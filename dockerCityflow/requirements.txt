@@ -1,0 +1,12 @@
+numpy
+pandas
+cityflow
+transformers
+trl
+tqdm
+wandb
+datasets
+vllm
+peft
+tensorflow
+

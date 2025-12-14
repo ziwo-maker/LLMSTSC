@@ -1,0 +1,434 @@
+round 0 starts
+==============  generator =============
+WARNING:absl:`lr` is deprecated in Keras optimizer, please use `learning_rate` or use the legacy optimizer, e.g.,tf.keras.optimizers.legacy.Adam.
+Model: "model"
+__________________________________________________________________________________________________
+ Layer (type)                   Output Shape         Param #     Connected to
+==================================================================================================
+ input_cur_phase (InputLayer)   [(None, 8)]          0           []
+
+ input_feat2 (InputLayer)       [(None, 12)]         0           []
+
+ embedding (Embedding)          (None, 8, 4)         8           ['input_cur_phase[0][0]']
+
+ input_feat3 (InputLayer)       [(None, 12)]         0           []
+
+ vec_1 (Lambda)                 (None, 1)            0           ['input_feat2[0][0]']
+
+ activation (Activation)        (None, 8, 4)         0           ['embedding[0][0]']
+
+ vec2_1 (Lambda)                (None, 1)            0           ['input_feat3[0][0]']
+
+ vec_3 (Lambda)                 (None, 1)            0           ['input_feat2[0][0]']
+
+ vec2_3 (Lambda)                (None, 1)            0           ['input_feat3[0][0]']
+
+ vec_5 (Lambda)                 (None, 1)            0           ['input_feat2[0][0]']
+
+ vec2_5 (Lambda)                (None, 1)            0           ['input_feat3[0][0]']
+
+ vec_7 (Lambda)                 (None, 1)            0           ['input_feat2[0][0]']
+
+ vec2_7 (Lambda)                (None, 1)            0           ['input_feat3[0][0]']
+
+ vec_0 (Lambda)                 (None, 1)            0           ['input_feat2[0][0]']
+
+ vec2_0 (Lambda)                (None, 1)            0           ['input_feat3[0][0]']
+
+ vec_2 (Lambda)                 (None, 1)            0           ['input_feat2[0][0]']
+
+ vec2_2 (Lambda)                (None, 1)            0           ['input_feat3[0][0]']
+
+ vec_4 (Lambda)                 (None, 1)            0           ['input_feat2[0][0]']
+
+ vec2_4 (Lambda)                (None, 1)            0           ['input_feat3[0][0]']
+
+ vec_6 (Lambda)                 (None, 1)            0           ['input_feat2[0][0]']
+
+ vec2_6 (Lambda)                (None, 1)            0           ['input_feat3[0][0]']
+
+ num_vec_mapping (Dense)        (None, 4)            8           ['vec_0[0][0]',
+                                                                  'vec_1[0][0]',
+                                                                  'vec_2[0][0]',
+                                                                  'vec_3[0][0]',
+                                                                  'vec_4[0][0]',
+                                                                  'vec_5[0][0]',
+                                                                  'vec_6[0][0]',
+                                                                  'vec_7[0][0]']
+
+ phase_1 (Lambda)               (None, 4)            0           ['activation[0][0]']
+
+ num_vec_mapping_part (Dense)   (None, 4)            8           ['vec2_0[0][0]',
+                                                                  'vec2_1[0][0]',
+                                                                  'vec2_2[0][0]',
+                                                                  'vec2_3[0][0]',
+                                                                  'vec2_4[0][0]',
+                                                                  'vec2_5[0][0]',
+                                                                  'vec2_6[0][0]',
+                                                                  'vec2_7[0][0]']
+
+ phase_3 (Lambda)               (None, 4)            0           ['activation[0][0]']
+
+ phase_5 (Lambda)               (None, 4)            0           ['activation[0][0]']
+
+ phase_7 (Lambda)               (None, 4)            0           ['activation[0][0]']
+
+ phase_0 (Lambda)               (None, 4)            0           ['activation[0][0]']
+
+ phase_2 (Lambda)               (None, 4)            0           ['activation[0][0]']
+
+ phase_4 (Lambda)               (None, 4)            0           ['activation[0][0]']
+
+ phase_6 (Lambda)               (None, 4)            0           ['activation[0][0]']
+
+ lane_1 (Concatenate)           (None, 12)           0           ['num_vec_mapping[1][0]',
+                                                                  'phase_1[0][0]',
+                                                                  'num_vec_mapping_part[1][0]']
+
+ lane_3 (Concatenate)           (None, 12)           0           ['num_vec_mapping[3][0]',
+                                                                  'phase_3[0][0]',
+                                                                  'num_vec_mapping_part[3][0]']
+
+ lane_5 (Concatenate)           (None, 12)           0           ['num_vec_mapping[5][0]',
+                                                                  'phase_5[0][0]',
+                                                                  'num_vec_mapping_part[5][0]']
+
+ lane_7 (Concatenate)           (None, 12)           0           ['num_vec_mapping[7][0]',
+                                                                  'phase_7[0][0]',
+                                                                  'num_vec_mapping_part[7][0]']
+
+ lane_0 (Concatenate)           (None, 12)           0           ['num_vec_mapping[0][0]',
+                                                                  'phase_0[0][0]',
+                                                                  'num_vec_mapping_part[0][0]']
+
+ lane_2 (Concatenate)           (None, 12)           0           ['num_vec_mapping[2][0]',
+                                                                  'phase_2[0][0]',
+                                                                  'num_vec_mapping_part[2][0]']
+
+ lane_4 (Concatenate)           (None, 12)           0           ['num_vec_mapping[4][0]',
+                                                                  'phase_4[0][0]',
+                                                                  'num_vec_mapping_part[4][0]']
+
+ lane_6 (Concatenate)           (None, 12)           0           ['num_vec_mapping[6][0]',
+                                                                  'phase_6[0][0]',
+                                                                  'num_vec_mapping_part[6][0]']
+
+ lane_embedding (Dense)         (None, 24)           312         ['lane_1[0][0]',
+                                                                  'lane_3[0][0]',
+                                                                  'lane_5[0][0]',
+                                                                  'lane_7[0][0]',
+                                                                  'lane_0[0][0]',
+                                                                  'lane_2[0][0]',
+                                                                  'lane_4[0][0]',
+                                                                  'lane_6[0][0]']
+
+ WT_ET (Add)                    (None, 24)           0           ['lane_embedding[0][0]',
+                                                                  'lane_embedding[1][0]']
+
+ NT_ST (Add)                    (None, 24)           0           ['lane_embedding[2][0]',
+                                                                  'lane_embedding[3][0]']
+
+ WL_EL (Add)                    (None, 24)           0           ['lane_embedding[4][0]',
+                                                                  'lane_embedding[5][0]']
+
+ NL_SL (Add)                    (None, 24)           0           ['lane_embedding[6][0]',
+                                                                  'lane_embedding[7][0]']
+
+ concat_compete_phase_0_1 (Conc  (None, 48)          0           ['WT_ET[0][0]',
+ atenate)                                                         'NT_ST[0][0]']
+
+ concat_compete_phase_0_2 (Conc  (None, 48)          0           ['WT_ET[0][0]',
+ atenate)                                                         'WL_EL[0][0]']
+
+ concat_compete_phase_0_3 (Conc  (None, 48)          0           ['WT_ET[0][0]',
+ atenate)                                                         'NL_SL[0][0]']
+
+ concat_compete_phase_1_0 (Conc  (None, 48)          0           ['NT_ST[0][0]',
+ atenate)                                                         'WT_ET[0][0]']
+
+ concat_compete_phase_1_2 (Conc  (None, 48)          0           ['NT_ST[0][0]',
+ atenate)                                                         'WL_EL[0][0]']
+
+ concat_compete_phase_1_3 (Conc  (None, 48)          0           ['NT_ST[0][0]',
+ atenate)                                                         'NL_SL[0][0]']
+
+ concat_compete_phase_2_0 (Conc  (None, 48)          0           ['WL_EL[0][0]',
+ atenate)                                                         'WT_ET[0][0]']
+
+ concat_compete_phase_2_1 (Conc  (None, 48)          0           ['WL_EL[0][0]',
+ atenate)                                                         'NT_ST[0][0]']
+
+ concat_compete_phase_2_3 (Conc  (None, 48)          0           ['WL_EL[0][0]',
+ atenate)                                                         'NL_SL[0][0]']
+
+ concat_compete_phase_3_0 (Conc  (None, 48)          0           ['NL_SL[0][0]',
+ atenate)                                                         'WT_ET[0][0]']
+
+ concat_compete_phase_3_1 (Conc  (None, 48)          0           ['NL_SL[0][0]',
+ atenate)                                                         'NT_ST[0][0]']
+
+ concat_compete_phase_3_2 (Conc  (None, 48)          0           ['NL_SL[0][0]',
+ atenate)                                                         'WL_EL[0][0]']
+
+ concat_all (Concatenate)       (None, 576)          0           ['concat_compete_phase_0_1[0][0]'
+                                                                 , 'concat_compete_phase_0_2[0][0]
+                                                                 ',
+                                                                  'concat_compete_phase_0_3[0][0]'
+                                                                 , 'concat_compete_phase_1_0[0][0]
+                                                                 ',
+                                                                  'concat_compete_phase_1_2[0][0]'
+                                                                 , 'concat_compete_phase_1_3[0][0]
+                                                                 ',
+                                                                  'concat_compete_phase_2_0[0][0]'
+                                                                 , 'concat_compete_phase_2_1[0][0]
+                                                                 ',
+                                                                  'concat_compete_phase_2_3[0][0]'
+                                                                 , 'concat_compete_phase_3_0[0][0]
+                                                                 ',
+                                                                  'concat_compete_phase_3_1[0][0]'
+                                                                 , 'concat_compete_phase_3_2[0][0]
+                                                                 ']
+
+ constant_o (Lambda)            (None, 4, 3)         0           ['input_feat2[0][0]']
+
+ reshape (Reshape)              (None, 4, 3, 48)     0           ['concat_all[0][0]']
+
+ relation_embedding (Embedding)  (None, 4, 3, 4)     8           ['constant_o[0][0]']
+
+ lane_conv (Conv2D)             (None, 4, 3, 20)     980         ['reshape[0][0]']
+
+ relation_conv (Conv2D)         (None, 4, 3, 20)     100         ['relation_embedding[0][0]']
+
+ combine_feature (Multiply)     (None, 4, 3, 20)     0           ['lane_conv[0][0]',
+                                                                  'relation_conv[0][0]']
+
+ combine_conv (Conv2D)          (None, 4, 3, 20)     420         ['combine_feature[0][0]']
+
+ before_merge (Conv2D)          (None, 4, 3, 1)      21          ['combine_conv[0][0]']
+
+ reshape_1 (Reshape)            (None, 4, 3)         0           ['before_merge[0][0]']
+
+ q_values (Lambda)              (None, 4)            0           ['reshape_1[0][0]']
+
+==================================================================================================
+Total params: 1,865
+Trainable params: 1,865
+Non-trainable params: 0
+__________________________________________________________________________________________________
+WARNING:absl:`lr` is deprecated in Keras optimizer, please use `learning_rate` or use the legacy optimizer, e.g.,tf.keras.optimizers.legacy.Adam.
+Create intersection agent time:  1.4903531074523926
+make generator
+ ============= self.eng.reset() to be implemented ==========
+  6%|█████▋                                                                                           | 7/120 [00:01<00:15,  7.28it/s]
+1/1 [==============================] - 0s 453ms/step
+time: 0.0
+Step time:  0.06447005271911621
+time: 0.0, running_time: 0.553980827331543
+1/1 [==============================] - 0s 16ms/step
+time: 30.0
+Step time:  0.06474423408508301
+time: 30.0, running_time: 0.10402512550354004
+1/1 [==============================] - 0s 16ms/step
+time: 60.0
+Step time:  0.07250714302062988
+time: 60.0, running_time: 0.11003518104553223
+1/1 [==============================] - 0s 16ms/step
+time: 90.0
+Step time:  0.07782816886901855
+time: 90.0, running_time: 0.11530637741088867
+1/1 [==============================] - 0s 16ms/step
+time: 120.0
+Step time:  0.07913756370544434
+time: 120.0, running_time: 0.11713361740112305
+1/1 [==============================] - 0s 16ms/step
+time: 150.0
+Step time:  0.0851287841796875
+time: 150.0, running_time: 0.12237238883972168
+1/1 [==============================] - 0s 17ms/step
+time: 180.0
+Step time:  0.08990979194641113
+time: 180.0, running_time: 0.1280503273010254
+1/1 [==============================] - 0s 16ms/step
+time: 210.0
+Step time:  0.09060049057006836
+time: 210.0, running_time: 0.1292707920074463
+1/1 [==============================] - 0s 16ms/step
+time: 240.0
+Step time:  0.09599828720092773
+time: 240.0, running_time: 0.1335310935974121
+1/1 [==============================] - 0s 16ms/step
+time: 270.0
+Step time:  0.10061883926391602
+time: 270.0, running_time: 0.13808512687683105
+1/1 [==============================] - 0s 16ms/step
+time: 300.0
+Step time:  0.09606170654296875
+time: 300.0, running_time: 0.13508200645446777
+1/1 [==============================] - 0s 16ms/step
+time: 330.0
+Step time:  0.1049654483795166
+time: 330.0, running_time: 0.14207172393798828
+1/1 [==============================] - 0s 16ms/step
+time: 360.0
+Step time:  0.10482072830200195
+time: 360.0, running_time: 0.1416611671447754
+1/1 [==============================] - 0s 16ms/step
+time: 390.0
+Step time:  0.11643719673156738
+time: 390.0, running_time: 0.15572643280029297
+1/1 [==============================] - 0s 16ms/step
+time: 420.0
+Step time:  0.11202430725097656
+time: 420.0, running_time: 0.15003061294555664
+1/1 [==============================] - 0s 17ms/step
+time: 450.0
+Step time:  0.11550617218017578
+time: 450.0, running_time: 0.15353918075561523
+1/1 [==============================] - 0s 15ms/step
+time: 480.0
+Step time:  0.20858049392700195
+time: 480.0, running_time: 0.24651861190795898
+1/1 [==============================] - 0s 28ms/step
+time: 510.0
+Step time:  0.5310337543487549
+time: 510.0, running_time: 0.5962202548980713
+1/1 [==============================] - 0s 30ms/step
+time: 540.0
+Step time:  0.24754786491394043
+time: 540.0, running_time: 0.31914520263671875
+1/1 [==============================] - 0s 29ms/step
+time: 570.0
+Step time:  0.24642324447631836
+time: 570.0, running_time: 0.31734561920166016
+1/1 [==============================] - 0s 29ms/step
+time: 600.0
+Step time:  0.24178338050842285
+time: 600.0, running_time: 0.3110206127166748
+1/1 [==============================] - 0s 29ms/step
+time: 630.0
+Step time:  0.23912858963012695
+time: 630.0, running_time: 0.3083815574645996
+1/1 [==============================] - 0s 31ms/step
+time: 660.0
+Step time:  0.25628209114074707
+time: 660.0, running_time: 0.3272066116333008
+1/1 [==============================] - 0s 29ms/step
+time: 690.0
+Step time:  0.26325035095214844
+time: 690.0, running_time: 0.3317906856536865
+1/1 [==============================] - 0s 29ms/step
+time: 720.0
+Step time:  0.26157498359680176
+time: 720.0, running_time: 0.3296644687652588
+1/1 [==============================] - 0s 29ms/step
+time: 750.0
+Step time:  0.2598297595977783
+time: 750.0, running_time: 0.32975268363952637
+1/1 [==============================] - 0s 29ms/step
+time: 780.0
+Step time:  0.27043986320495605
+time: 780.0, running_time: 0.33980727195739746
+1/1 [==============================] - 0s 29ms/step
+time: 810.0
+Step time:  0.27239227294921875
+time: 810.0, running_time: 0.3401908874511719
+1/1 [==============================] - 0s 28ms/step
+time: 840.0
+Step time:  0.2778792381286621
+time: 840.0, running_time: 0.3468668460845947
+1/1 [==============================] - 0s 29ms/step
+time: 870.0
+Step time:  0.2863342761993408
+time: 870.0, running_time: 0.3537898063659668
+1/1 [==============================] - 0s 28ms/step
+time: 900.0
+Step time:  0.31399059295654297
+time: 900.0, running_time: 0.38159632682800293
+1/1 [==============================] - 0s 31ms/step
+time: 930.0
+Step time:  0.3066442012786865
+time: 930.0, running_time: 0.3799469470977783
+1/1 [==============================] - 0s 30ms/step
+time: 960.0
+Step time:  0.3253164291381836
+time: 960.0, running_time: 0.3931605815887451
+1/1 [==============================] - 0s 28ms/step
+time: 990.0
+Step time:  0.325303316116333
+time: 990.0, running_time: 0.39580798149108887
+1/1 [==============================] - 0s 31ms/step
+time: 1020.0
+Step time:  0.31104516983032227
+time: 1020.0, running_time: 0.3841245174407959
+1/1 [==============================] - 0s 30ms/step
+time: 1050.0
+Step time:  0.315964937210083
+time: 1050.0, running_time: 0.38597989082336426
+1/1 [==============================] - 0s 29ms/step
+time: 1080.0
+Step time:  0.33239269256591797
+time: 1080.0, running_time: 0.40096211433410645
+1/1 [==============================] - 0s 29ms/step
+time: 1110.0
+Step time:  0.3421769142150879
+time: 1110.0, running_time: 0.4125528335571289
+1/1 [==============================] - 0s 29ms/step
+time: 1140.0
+Step time:  0.3467254638671875
+time: 1140.0, running_time: 0.41608500480651855
+1/1 [==============================] - 0s 29ms/step
+time: 1170.0
+Step time:  0.6855990886688232
+time: 1170.0, running_time: 0.7549073696136475
+1/1 [==============================] - 0s 29ms/step
+time: 1200.0
+Step time:  0.35550451278686523
+time: 1200.0, running_time: 0.4219479560852051
+1/1 [==============================] - 0s 30ms/step
+time: 1230.0
+Step time:  0.35335612297058105
+time: 1230.0, running_time: 0.4248390197753906
+1/1 [==============================] - 0s 32ms/step
+time: 1260.0
+Step time:  0.3470189571380615
+time: 1260.0, running_time: 0.4178144931793213
+1/1 [==============================] - 0s 30ms/step
+time: 1290.0
+Step time:  0.3449392318725586
+time: 1290.0, running_time: 0.4167304039001465
+1/1 [==============================] - 0s 31ms/step
+time: 1320.0
+Step time:  0.34736084938049316
+time: 1320.0, running_time: 0.4172549247741699
+1/1 [==============================] - 0s 30ms/step
+time: 1350.0
+Step time:  0.3373372554779053
+time: 1350.0, running_time: 0.40663790702819824
+1/1 [==============================] - 0s 30ms/step
+time: 1380.0
+Step time:  0.32668328285217285
+time: 1380.0, running_time: 0.39856457710266113
+1/1 [==============================] - 0s 31ms/step
+time: 1410.0
+Step time:  0.2964441776275635
+time: 1410.0, running_time: 0.36710453033447266
+1/1 [==============================] - 0s 30ms/step
+time: 1440.0
+Step time:  0.295438289642334
+time: 1440.0, running_time: 0.3670032024383545
+1/1 [==============================] - 0s 29ms/step
+time: 1470.0
+Step time:  0.2954592704772949
+time: 1470.0, running_time: 0.36609649658203125
+1/1 [==============================] - 0s 30ms/step
+time: 1500.0
+Step time:  0.2977728843688965
+time: 1500.0, running_time: 0.3671855926513672
+1/1 [==============================] - 0s 29ms/step
+time: 1530.0
+Step time:  0.33350372314453125
+time: 1530.0, running_time: 0.4032595157623291
+1/1 [==============================] - 0s 30ms/step
+time: 1560.0
+Process Process-1:
+Traceback (most recent call last):

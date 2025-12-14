@@ -1,0 +1,7 @@
+{"time":"2025-12-14T07:24:29.934653288Z","level":"INFO","msg":"stream: starting","core version":"0.23.1"}
+{"time":"2025-12-14T07:24:30.913146638Z","level":"INFO","msg":"stream: created new stream","id":"javyshys"}
+{"time":"2025-12-14T07:24:30.913497493Z","level":"INFO","msg":"handler: started","stream_id":"javyshys"}
+{"time":"2025-12-14T07:24:30.913592912Z","level":"INFO","msg":"stream: started","id":"javyshys"}
+{"time":"2025-12-14T07:24:30.913596245Z","level":"INFO","msg":"writer: started","stream_id":"javyshys"}
+{"time":"2025-12-14T07:24:30.913639193Z","level":"INFO","msg":"sender: started","stream_id":"javyshys"}
+{"time":"2025-12-14T07:24:52.567096835Z","level":"INFO","msg":"stream: closing","id":"javyshys"}

@@ -1,0 +1,23 @@
+{
+  "version": "0.2.0",
+  "configurations": [
+    {
+      "name": "Run ChatGPT TSCS",
+      "type": "python",
+      "request": "launch",
+      "program": "${workspaceFolder}/run_chatgpt.py",
+      "console": "integratedTerminal",
+      "cwd": "${workspaceFolder}",
+      "env": {
+        "WANDB_MODE": "offline"
+      },
+      "args": [
+        "--prompt", "Commonsense",
+        "--dataset", "hangzhou",
+        "--traffic_file", "anon_4_4_hangzhou_real.json",
+        "--gpt_version", "gpt-4",
+        "--proj_name", "TSCS"
+      ]
+    }
+  ]
+}
