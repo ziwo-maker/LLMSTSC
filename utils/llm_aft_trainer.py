@@ -1,3 +1,4 @@
+from pyexpat.errors import messages
 from utils.my_utils import dump_json, get_state_detail, state2text, getPrompt, action2code, code2action, eight_phase_list, four_phase_list, torch_gc
 import vllm
 import os
@@ -88,18 +89,37 @@ class LLM_CGPR_Collector:
 
         # init LLM
         llm_path = self.dic_agent_conf["LLM_PATH"]
-        self.llm_model = AutoModelForCausalLM.from_pretrained(
-            llm_path,
-            torch_dtype=torch.bfloat16,
-            device_map=device_map,
-        )
+        llm_path_lower = llm_path.lower()
+        if "qwen" in llm_path_lower and "vl" in llm_path_lower:
+            # Qwen-VL specific loader (text-only usage; processor used as tokenizer)
+            from transformers import Qwen3VLForConditionalGeneration, AutoProcessor
+            self.qwen=True
+            self.llm_model = Qwen3VLForConditionalGeneration.from_pretrained(
+                llm_path,
+                dtype="auto",
+                device_map=device_map,
+            )
 
-        # init tokenizer
-        self.tokenizer = AutoTokenizer.from_pretrained(
-            llm_path,
-            padding_side="left"
-        )
-        self.tokenizer.pad_token_id = 0
+            # use processor for text tokenization (no image handling here)
+            self.tokenizer = AutoProcessor.from_pretrained(llm_path)
+            try:
+                self.tokenizer.pad_token_id = 0
+            except Exception:
+                # processor may not expose pad_token_id; ignore if so
+                pass
+        else:
+            self.llm_model = AutoModelForCausalLM.from_pretrained(
+                llm_path,
+                torch_dtype=torch.bfloat16,
+                device_map=device_map,
+            )
+
+            # init tokenizer
+            self.tokenizer = AutoTokenizer.from_pretrained(
+                llm_path,
+                padding_side="left"
+            )
+            self.tokenizer.pad_token_id = 0
 
         self.generation_kwargs = {
             "min_length": -1,
@@ -382,12 +402,30 @@ class LLM_CGPR_Trainer:
 
         # init LLM
         llm_path = self.dic_agent_conf["LLM_PATH"]
-        self.llm_model = AutoModelForCausalLM.from_pretrained(
-            llm_path,
-            torch_dtype=torch.bfloat16,
-            # load_in_8bit=True,
-            device_map=device_map,
-        )
+        llm_path_lower = llm_path.lower()
+        if "qwen" in llm_path_lower and "vl" in llm_path_lower:
+            from transformers import Qwen3VLForConditionalGeneration, AutoProcessor
+            self.qwen=True
+            # load Qwen-VL (text-only usage)
+            self.llm_model = Qwen3VLForConditionalGeneration.from_pretrained(
+                llm_path,
+                dtype="auto",
+                device_map=device_map,
+            )
+
+            # processor as tokenizer for text-only
+            self.tokenizer = AutoProcessor.from_pretrained(llm_path)
+            try:
+                self.tokenizer.pad_token_id = 0
+            except Exception:
+                pass
+        else:
+            self.llm_model = AutoModelForCausalLM.from_pretrained(
+                llm_path,
+                torch_dtype=torch.bfloat16,
+                # load_in_8bit=True,
+                device_map=device_map,
+            )
         gradient_accumulation_steps = self.dic_agent_conf["BATCH_SIZE"] // self.dic_agent_conf["MINI_BATCH_SIZE"]
         self.training_args = TrainingArguments(output_dir=f"{self.dic_agent_conf['LLM_OUTPUT_DIR']}_{self.dic_traffic_env_conf['TRAFFIC_FILE'].replace('.json', '')}",
                                                num_train_epochs=self.dic_agent_conf["EPOCHS"],
@@ -503,7 +541,16 @@ class LLM_CGPR_Trainer:
                 prompts.append(prompt)
             inputs = self.tokenizer(prompts, truncation=True, max_length=2048, padding=True, return_tensors='pt').to('cuda')
 
-            response_ids = self.llm_model.generate(input_ids=inputs["input_ids"], **self.test_generation_kwargs)
+            # response_ids = self.llm_model.generate(input_ids=inputs["input_ids"], **self.test_generation_kwargs)
+            # 构造全 0 的 token_type_ids (假设这是纯文本部分，或者模型默认处理)
+            # 注意：如果是包含图片的输入，这里不能简单的全 0，必须沿用预处理时的逻辑
+            current_token_type_ids = torch.zeros_like(current_input_ids)
+
+            response_ids = self.llm_model.generate(
+                input_ids=current_input_ids,
+                token_type_ids=current_token_type_ids, 
+                **self.test_generation_kwargs
+            )
             responses = self.tokenizer.batch_decode(response_ids, skip_special_tokens=True)
 
             fail_num = 0
@@ -669,19 +716,37 @@ class LLM_Inference:
 
         # init LLM
         llm_path = self.dic_agent_conf["LLM_PATH"]
-        self.llm_model = AutoModelForCausalLM.from_pretrained(
-            llm_path,
-            torch_dtype=torch.bfloat16,
-            device_map=device_map,
-        )
+        llm_path_lower = llm_path.lower()
+        if "qwen" in llm_path_lower and "vl" in llm_path_lower:
+            from transformers import Qwen3VLForConditionalGeneration, AutoProcessor
+            self.qwen=True
+            self.llm_model = Qwen3VLForConditionalGeneration.from_pretrained(
+                llm_path,
+                dtype="auto",
+                device_map=device_map,
+            )
 
-        # init tokenizer
-        self.tokenizer = AutoTokenizer.from_pretrained(
-            llm_path,
-            padding_side="left",
-            padding=True
-        )
-        self.tokenizer.pad_token_id = 0
+            # processor as tokenizer for text-only usage
+            self.tokenizer = AutoProcessor.from_pretrained(llm_path)
+            try:
+                self.tokenizer.pad_token_id = 0
+            except Exception:
+                pass
+        else:
+            self.llm_model = AutoModelForCausalLM.from_pretrained(
+                llm_path,
+                torch_dtype=torch.bfloat16,
+                device_map=device_map,
+                trust_remote_code=True
+            )
+
+            # init tokenizer
+            self.tokenizer = AutoTokenizer.from_pretrained(
+                llm_path,
+                padding_side="left",
+                padding=True
+            )
+            self.tokenizer.pad_token_id = 0
 
         self.test_generation_kwargs = {
             "min_length": -1,
@@ -690,8 +755,8 @@ class LLM_Inference:
             "temperature": 0.1,
             "do_sample": True,
             "max_new_tokens": self.dic_agent_conf["NEW_MAX_TOKENS"],
-            "pad_token_id": self.tokenizer.pad_token_id,
-            "eos_token_id": self.tokenizer.eos_token_id
+            "pad_token_id": getattr(self.tokenizer, "pad_token_id", None),
+            "eos_token_id": getattr(self.tokenizer, "eos_token_id", None)
         }
 
     def initialize(self):
@@ -744,14 +809,39 @@ class LLM_Inference:
                 prompt = getPrompt(state2text(s))
                 prompt = prompt[0]['content'] + "\n\n### Instruction:\n" + prompt[1]['content'] + "\n\n### Response:\n"
                 prompts.append(prompt)
-            inputs = self.tokenizer(prompts, truncation=True, max_length=2048, padding=True, return_tensors='pt').to('cuda')
+            if  hasattr(self, 'qwen') and self.qwen is not None and self.qwen==True:
+
+                text_inputs = [
+                self.tokenizer.apply_chat_template(
+                    [{"role": "user", "content": p}],  # 这里 content 直接用字符串 p
+                    tokenize=False, 
+                    add_generation_prompt=True
+                )
+                for p in prompts
+                    ]
+
+                # 第二步：调用 tokenizer/processor 时，显式指定 text 参数
+                # 关键修改：加上 text=... 和 images=None
+                inputs = self.tokenizer(
+                    text=text_inputs,    # <--- 必须显式指定这是 text
+                    images=None,         # <--- 显式告诉模型没有图片，防止它去解析文本中的特殊符号
+                    padding=True, 
+                    return_tensors='pt'
+                ).to('cuda')
+            else:
+                inputs = self.tokenizer(prompts, truncation=True, max_length=2048, padding=True, return_tensors='pt').to('cuda')
 
             responses = []
             previous_flag = 0
             for i in range(len(current_states)):
                 if (i + 1) % 16 == 0 or i + 1 >= len(current_states):
-                    response_ids = self.llm_model.generate(input_ids=inputs["input_ids"][previous_flag:i+1], **self.test_generation_kwargs)
-                    responses += self.tokenizer.batch_decode(response_ids, skip_special_tokens=True)
+                    current_input_ids = inputs["input_ids"][previous_flag:i+1]
+                    current_token_type_ids = torch.zeros_like(current_input_ids)
+                    response_ids = self.llm_model.generate(input_ids=inputs["input_ids"][previous_flag:i+1],   **self.test_generation_kwargs)
+                    cur_response=self.tokenizer.batch_decode(response_ids, skip_special_tokens=True)
+                    # if not isinstance(cur_response, list):
+                    #     cur_response = [cur_response]
+                    responses += cur_response
                     previous_flag = i + 1
 
             fail_num = 0
@@ -900,7 +990,7 @@ class LLM_Inference_VLLM:
         self.trainer_built = False
         self.trainer = None
         self.device = None
-
+     
         if not os.path.exists("./fails"):
             os.mkdir("./fails")
         self.fail_log_file = f"./fails/{self.dic_agent_conf['LLM_MODEL']}-{self.dic_traffic_env_conf['TRAFFIC_FILE']}-{self.dic_traffic_env_conf['ROADNET_FILE']}.json"
@@ -912,27 +1002,54 @@ class LLM_Inference_VLLM:
 
         # init LLM
         llm_path = self.dic_agent_conf["LLM_PATH"]
-        self.llm_model = vllm.LLM(
-            model=llm_path,
-            tokenizer=llm_path,
-            dtype=torch.bfloat16
-        )
+        llm_path_lower = llm_path.lower()
+        if "qwen" in llm_path_lower and "vl" in llm_path_lower:
+            # vllm may not support Qwen-VL; fallback to transformers loader
+            from transformers import Qwen3VLForConditionalGeneration, AutoProcessor
+            self.qwen=True
+            print("Warning: detected Qwen-VL model in LLM_Inference_VLLM.initialize_llm — falling back to transformers loader")
+            self.llm_model = Qwen3VLForConditionalGeneration.from_pretrained(
+                llm_path,
+                dtype="auto",
+                device_map=device_map,
+            )
 
-        # init tokenizer
-        self.tokenizer = AutoTokenizer.from_pretrained(
-            llm_path,
-            padding_side="left",
-            padding=True
-        )
-        self.tokenizer.pad_token_id = 0
+            # processor as tokenizer for text-only usage
+            self.tokenizer = AutoProcessor.from_pretrained(llm_path)
+            try:
+                self.tokenizer.pad_token_id = 0
+            except Exception:
+                pass
 
-        test_generation_kwargs = {
-            "top_k": 50,
-            "top_p": 1.0,
-            "temperature": 0.1,
-            "max_tokens": 2048 + self.dic_agent_conf["NEW_MAX_TOKENS"]
-        }
-        self.generation_kwargs = vllm.SamplingParams(**test_generation_kwargs)
+            # set generation kwargs for transformer usage (note: calling code expects vllm usage)
+            self.generation_kwargs = {
+                "top_k": 50,
+                "top_p": 1.0,
+                "temperature": 0.1,
+                "max_new_tokens": self.dic_agent_conf["NEW_MAX_TOKENS"]
+            }
+        else:
+            self.llm_model = vllm.LLM(
+                model=llm_path,
+                tokenizer=llm_path,
+                dtype=torch.bfloat16
+            )
+
+            # init tokenizer
+            self.tokenizer = AutoTokenizer.from_pretrained(
+                llm_path,
+                padding_side="left",
+                padding=True
+            )
+            self.tokenizer.pad_token_id = 0
+
+            test_generation_kwargs = {
+                "top_k": 50,
+                "top_p": 1.0,
+                "temperature": 0.1,
+                "max_tokens": 2048 + self.dic_agent_conf["NEW_MAX_TOKENS"]
+            }
+            self.generation_kwargs = vllm.SamplingParams(**test_generation_kwargs)
 
     def initialize(self):
         path_check(self.dic_path)

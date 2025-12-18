@@ -8,13 +8,18 @@ import csv
 import io
 import pandas as pd
 import numpy as np
-
-url = "https://10.1.2.3/v1/chat/completions"
+import logging
+logging.basicConfig(
+    filename="request_log.log",
+    level=logging.INFO,
+    format="%(asctime)s - %(levelname)s - %(message)s"
+)
+url = "http://localhost:9997/v1/chat/completions"
 headers = {
     "Content-Type": "application/json",
     "Authorization": "YOUR_KEY_HERE"
 }
-
+model_name='qwen3-vl-32b'
 four_phase_list = {'ETWT': 0, 'NTST': 1, 'ELWL': 2, 'NLSL': 3}
 eight_phase_list = {'ETWT': 0, 'NTST': 1, 'ELWL': 2, 'NLSL': 3, 'WTWL': 4, 'ETEL': 5, 'STSL': 6, 'NTNL': 7}
 location_dict = {"N": "North", "S": "South", "E": "East", "W": "West"}
@@ -86,7 +91,7 @@ class ChatGPTTLCS_Wait_Time_Forecast(object):
             dump_json(self.state_action_prompt, self.state_action_prompt_file)  # 保存到文件
             self.temp_action_logger = action_code  # 记录编码
 
-            return  # 直接返回
+            return action_code  # 直接返回
 
         signal_text = ""  # 初始化信号相位文本
 
@@ -105,7 +110,7 @@ class ChatGPTTLCS_Wait_Time_Forecast(object):
                 # 构造请求数据
                  #修改代碼 模型名称
                 data = {
-                    "model": "qwen3",
+                    "model": model_name,
                     "messages": prompt,
                     "max_tokens": 2048,
                     "temperature": 0.0
@@ -138,6 +143,7 @@ class ChatGPTTLCS_Wait_Time_Forecast(object):
         # 记录编码和最后动作
         self.temp_action_logger = action_code
         self.last_action = signal_text
+        return action_code
 
     '''
     ============ Class Utils ============
@@ -258,7 +264,7 @@ class ChatGPTTLCS_Commonsense(object):
             dump_json(self.state_action_prompt, self.state_action_prompt_file)  # 保存到文件
             self.temp_action_logger = action_code  # 记录编码
 
-            return  # 直接返回
+            return action_code  # 直接返回
 
         signal_text = ""  # 初始化信号相位文本
 
@@ -266,7 +272,7 @@ class ChatGPTTLCS_Commonsense(object):
         retry_counter = 0  # 重试计数器
         # 如果未获得有效信号相位，循环请求GPT
         while signal_text not in self.phases:
-            if retry_counter > 10:
+            if retry_counter > 5:
                 signal_text = "ETWT"  # 超过最大重试次数，默认选择ETWT
                 break
             try:
@@ -276,24 +282,38 @@ class ChatGPTTLCS_Commonsense(object):
                 prompt = self.getPrompt(state_txt)
                 # 构造请求数据
                 data = {
-                    "model": self.gpt_version,
+                    "model": model_name,
                     "messages": prompt,
-                    "max_tokens": 2048,
+                    "max_tokens": 2048,  
                     "temperature": 0.0
                 }
                 # 向GPT接口发送请求，获取响应
+                
                 response = requests.post(url, headers=headers, data=json.dumps(data)).json()
+
+
+                 # 每 30 次记录一次日志  
+                logging.info(
+                        "Request count:  Response snapshot: %s",
+                        
+                        json.dumps(prompt, ensure_ascii=False)
+                    )
+                   
                 # 提取GPT分析内容
                 analysis = response['choices'][0]['message']['content']
                 retry_counter += 1  # 增加重试次数
                 # 用正则提取<signal>标签中的信号相位
                 signal_answer_pattern = r'<signal>(.*?)</signal>'
-                signal_text = re.findall(signal_answer_pattern, analysis)[-1]
-
+                if len(re.findall(signal_answer_pattern, analysis))!=0:
+                    print(analysis);
+                    signal_text = re.findall(signal_answer_pattern, analysis)[-1]
+                else:
+                    continue
             except Exception as e:
                 # 异常处理，记录错误和prompt
                 self.errors.append({"error": str(e), "prompt": prompt})
                 dump_json(self.errors, self.error_file)
+                raise
                 time.sleep(3)  # 等待3秒后重试
 
         # 将GPT分析内容加入prompt
@@ -308,6 +328,7 @@ class ChatGPTTLCS_Commonsense(object):
         # 记录编码和最后动作
         self.temp_action_logger = action_code
         self.last_action = signal_text
+        return action_code
 
     '''
     ============ Class Utils ============

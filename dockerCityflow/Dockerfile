@@ -1,37 +1,58 @@
-FROM ubuntu:20.04
+FROM nvidia/cuda:12.8.0-runtime-ubuntu20.04
 
-# Avoid interactive prompts during package installation
+
+
+# 防止安装过程中的交互式提示
 ENV DEBIAN_FRONTEND=noninteractive
 
-# C++ dependencies
-RUN apt-get update && \
-    apt-get install -y build-essential cmake wget git && \
-    apt-get clean && \
-    rm -rf /var/lib/apt/lists/*
-
-# Install Miniconda with Python 3.8+
+# 设置基础环境变量
 ENV LANG=C.UTF-8 LC_ALL=C.UTF-8
 ENV PATH /opt/conda/bin:$PATH
 
-RUN wget -P /tmp/ https://repo.anaconda.com/miniconda/Miniconda3-py38_23.5.2-0-Linux-x86_64.sh && \
-    /bin/bash /tmp/Miniconda3-py38_23.5.2-0-Linux-x86_64.sh -b -p /opt/conda && \
-    rm /tmp/Miniconda3-py38_23.5.2-0-Linux-x86_64.sh && \
+# 1. 安装系统依赖和 CUDA 工具包
+# 合并 apt install 以减少镜像层数,安装完成后清理缓存
+RUN apt-get update && \
+    apt-get install -y --no-install-recommends \
+    build-essential \
+    vim \
+    cmake \
+    wget \
+    git \
+    ca-certificates \
+    nvidia-cuda-toolkit \
+    && apt-get clean && \
+    rm -rf /var/lib/apt/lists/*
+
+# 2. 安装 Miniconda (Python 3.10 版本)
+# 使用 Miniconda3-py310 指定 Python 3.10
+RUN wget -P /tmp/ https://repo.anaconda.com/miniconda/Miniconda3-py310_23.10.0-1-Linux-x86_64.sh && \
+    /bin/bash /tmp/Miniconda3-py310_23.10.0-1-Linux-x86_64.sh -b -p /opt/conda && \
+    rm /tmp/Miniconda3-py310_23.10.0-1-Linux-x86_64.sh && \
     ln -s /opt/conda/etc/profile.d/conda.sh /etc/profile.d/conda.sh && \
     echo ". /opt/conda/etc/profile.d/conda.sh" >> ~/.bashrc && \
-    /opt/conda/bin/conda clean -afy
+    conda clean -afy
 
-# Install cityflow 
-RUN git clone https://github.com/cityflow-project/CityFlow.git /home/CityFlow 
-RUN
-RUN pip install --no-cache-dir flask && \
+#RUN pip3 install torch torchvision
+# 3. 升级 pip
+# 在安装任何 Python 包之前,确保 pip 是最新的
+RUN python -m pip install --upgrade pip
+
+# 4. 安装 CityFlow
+# 先安装 Flask 依赖,再编译安装 CityFlow
+RUN git clone https://github.com/cityflow-project/CityFlow.git /home/CityFlow && \
+    pip install --no-cache-dir flask && \
     cd /home/CityFlow && \
     pip install --no-cache-dir .
-RUN pip3 install torch  
-COPY requirements.txt /home
-#RUN pip install -r /home/requirements.txt  -i https://pypi.tuna.tsinghua.edu.cn/simple
-RUN pip install -r /home/requirements.txt  
-RUN pip install tensorflow
-RUN apt-get update
-RUN python3 -m pip install --upgrade typing_extensions
-RUN python -m pip install rich
+# 5. 安装业务依赖
+# 复制 requirements.txt 并安装
+COPY requirements.txt /home/requirements.txt
+RUN pip install --no-cache-dir -r /home/requirements.txt -i https://mirrors.tuna.tsinghua.edu.cn/pypi/web/simple
+
+# 6. 安装深度学习框架 (PyTorch & TensorFlow)
+# 注意:cu130 目前通常不可用,已替换为稳定的 cu118 (CUDA 11.8)
+# 如果你的宿主机驱动支持 CUDA 12,也可以改为 cu121
+RUN pip install --no-cache-dir torch torchvision && \
+    pip install --no-cache-dir tensorflow && \
+    pip install --no-cache-dir rich typing_extensions
+RUN pip install tf-keras
 WORKDIR /home/code

@@ -132,7 +132,7 @@ class OneLine:
                 # 当前步数
                 count = step_num
                 # 如果是ChatGPT/open_llm模型，使用多线程选择动作
-                if "ChatGPT" not in self.dic_traffic_env_conf["MODEL_NAME"] or "open_llm" in self.dic_traffic_env_conf["MODEL_NAME"]:
+                if "ChatGPT" in self.dic_traffic_env_conf["MODEL_NAME"] or "open_llm" in self.dic_traffic_env_conf["MODEL_NAME"]:
                     thread = threading.Thread(target=self.agents[i].choose_action, args=(self.env,))
                     threads.append(thread)
                 else:
@@ -141,7 +141,7 @@ class OneLine:
                     action_list.append(action)
 
             # ChatGPT模型多线程动作选择
-            if "ChatGPT" not in self.dic_traffic_env_conf["MODEL_NAME"]:
+            if "ChatGPT" in self.dic_traffic_env_conf["MODEL_NAME"]:
                 for thread in threads:
                     thread.start()
 

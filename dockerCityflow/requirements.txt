@@ -1,6 +1,5 @@
 numpy
 pandas
-cityflow
 transformers
 trl
 tqdm

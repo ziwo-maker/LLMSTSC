@@ -93,6 +93,12 @@ class Intersection:
         self.flicker = 0
 
     def set_signal(self, action, action_pattern, yellow_time, path_to_log):
+        # ensure action is an int when it's passed as a string (some agents may return stringified numbers)
+        if isinstance(action, str):
+            try:
+                action = int(action)
+            except ValueError:
+                pass
         if self.all_yellow_flag:
             # in yellow phase
             self.flicker = 0

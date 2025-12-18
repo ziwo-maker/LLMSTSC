@@ -16,7 +16,7 @@ def parse_args():
     parser.add_argument("--prompt", type=str, default='Commonsense')
     parser.add_argument("--proj_name", type=str, default="chatgpt-TSCS")
     parser.add_argument("--eightphase", action="store_true", default=False)
-    parser.add_argument("--multi_process", action="store_true", default=False)
+    parser.add_argument("--multi_process", action="store_true", default=True)
     parser.add_argument("--workers", type=int, default=1)
     parser.add_argument("--gpt_version", type=str, default="gpt-4")
     parser.add_argument("--dataset", type=str, default="jinan")
