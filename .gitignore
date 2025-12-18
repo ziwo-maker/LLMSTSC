@@ -1,1 +1,8 @@
 records/**/*replayLogFile.txt
+*.log
+.env
+*.local
+wandb/*
+*.out
+*.txt
+*.json
