@@ -18,6 +18,7 @@ def parse_args():
     parser.add_argument("--eightphase", action="store_true", default=False)
     parser.add_argument("--multi_process", action="store_true", default=True)
     parser.add_argument("--workers", type=int, default=1)
+    parser.add_argument("--tensor_parallel_size", type=int, default=0)
     parser.add_argument("--dataset", type=str, default="template")
     parser.add_argument("--traffic_file", type=str, default="flow_main_stream.json")
 
@@ -72,7 +73,8 @@ def main(in_args):
         "LLM_PATH": in_args.llm_path,
         "LLM_MODEL": in_args.llm_model,
         "LOG_DIR": f"./{in_args.llm_model}_logs",
-        "NEW_MAX_TOKENS": in_args.new_max_tokens
+        "NEW_MAX_TOKENS": in_args.new_max_tokens,
+        "TENSOR_PARALLEL_SIZE": in_args.tensor_parallel_size
     }
 
     dic_traffic_env_conf_extra = {
@@ -85,6 +87,10 @@ def main(in_args):
         "NUM_ROUNDS": in_args.num_rounds,
         "NUM_ROW": NUM_ROW,
         "NUM_COL": NUM_COL,
+        "ENABLE_TRAFFIC_COUNT": True,
+        "TRAFFIC_COUNT_INTERVALS": [5, 60, 3600],
+        "TRAFFIC_COUNT_ADD_TOTAL": True,
+        "TRAFFIC_COUNT_BASENAME": "traffic_counts",
 
         "TRAFFIC_FILE": in_args.traffic_file,
         "ROADNET_FILE": "roadnet_{0}.json".format(road_net),

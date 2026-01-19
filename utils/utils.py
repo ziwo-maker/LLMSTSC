@@ -87,7 +87,16 @@ def oneline_wrapper(dic_agent_conf, dic_traffic_env_conf, dic_path, roadnet, tra
 
         # delete junk
         cmd_delete_model = 'rm -rf <dir>'.replace("<dir>", dic_path["PATH_TO_MODEL"])
-        cmd_delete_work = 'find <dir> -type f ! -name "state_action.json" -exec rm -rf {} \;'.replace("<dir>", dic_path["PATH_TO_WORK_DIRECTORY"])
+        traffic_base_name = dic_traffic_env_conf.get(
+            "TRAFFIC_COUNT_BASENAME",
+            config.dic_traffic_env_conf.get("TRAFFIC_COUNT_BASENAME", "traffic_counts"),
+        )
+        traffic_pattern = f"{traffic_base_name}_*.csv"
+        cmd_delete_work = (
+            'find <dir> -type f ! -name "state_action.json" ! -name "<traffic_pattern>" -exec rm -rf {} \\;'
+            .replace("<dir>", dic_path["PATH_TO_WORK_DIRECTORY"])
+            .replace("<traffic_pattern>", traffic_pattern)
+        )
         os.system(cmd_delete_model)
         os.system(cmd_delete_work)
 

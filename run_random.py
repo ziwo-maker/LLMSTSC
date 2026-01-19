@@ -20,12 +20,13 @@ def parse_args():
     parser.add_argument("--workers", type=int, default=1)
     parser.add_argument("--dataset", type=str, default="jinan")
     parser.add_argument("--traffic_file", type=str, default="anon_3_4_jinan_real.json")
+    parser.add_argument("--traffic_count_interval", type=int, default=2)
 
     return parser.parse_args()
 
 
 def main(in_args):
-    traffic_file_list = []
+    traffic_file_list = [] 
 
     if in_args.dataset == 'jinan':
         count = 3600
@@ -79,6 +80,10 @@ def main(in_args):
         "RUN_COUNTS": count,
         "NUM_ROW": NUM_ROW,
         "NUM_COL": NUM_COL,
+        "ENABLE_TRAFFIC_COUNT": True,
+        "TRAFFIC_COUNT_INTERVALS": [in_args.traffic_count_interval],
+        "TRAFFIC_COUNT_ADD_TOTAL": True,
+        "TRAFFIC_COUNT_BASENAME": "traffic_counts",
         "TRAFFIC_FILE": in_args.traffic_file,
         "ROADNET_FILE": "roadnet_{0}.json".format(road_net),
         "LIST_STATE_FEATURE": [

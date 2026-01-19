@@ -137,8 +137,14 @@ class OneLine:
                     threads.append(thread)
                 else:
                     # 其它模型直接选择动作
-                    action = self.agents[i].choose_action(self.env)  #models/chatgpt.py
-                    action_list.append(action)
+                    if self.dic_traffic_env_conf["MODEL_NAME"] in ["EfficientPressLight", "EfficientColight",
+                                                                   "EfficientMPLight", "Attend",
+                                                                   "AdvancedMPLight", "AdvancedColight", "AdvancedDQN"]:
+                        if i == 0:
+                            action_list = self.agents[i].choose_action(count, state)
+                    else:
+                        action = self.agents[i].choose_action(count, one_state)
+                        action_list.append(action)
 
             # ChatGPT模型多线程动作选择
             if "ChatGPT" in self.dic_traffic_env_conf["MODEL_NAME"]:

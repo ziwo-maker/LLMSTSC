@@ -6,6 +6,7 @@ import pandas as pd
 import os
 import cityflow as engine
 import time
+from datetime import datetime, timedelta
 from multiprocessing import Process
 from .my_utils import load_json, calculate_road_length
 from functools import reduce
@@ -501,6 +502,14 @@ class CityFlowEnv:
         self.system_states = None
         self.lane_length = None
         self.waiting_vehicle_list = {}
+        self.traffic_count_enabled = False
+        self.traffic_road_ids = []
+        self.traffic_road_id_to_index = {}
+        self.traffic_count_intervals = []
+        self.traffic_counts_by_interval = {}
+        self._traffic_prev_road_vehicle_sets = None
+        self._traffic_curr_road_vehicle_sets = None
+        self.traffic_base_dt = None
 
         # check min action time
         if self.dic_traffic_env_conf["MIN_ACTION_TIME"] <= self.dic_traffic_env_conf["YELLOW_TIME"]:
@@ -568,6 +577,8 @@ class CityFlowEnv:
                               "get_vehicle_speed": self.eng.get_vehicle_speed(),
                               "get_vehicle_distance": self.eng.get_vehicle_distance(),
                               }
+
+        self._init_traffic_counter()
 
         for inter in self.list_intersection:
             inter.update_current_measurements(self.system_states)
@@ -695,6 +706,151 @@ class CityFlowEnv:
 
         self.intersection_dict = agent_intersections
 
+    def _init_traffic_counter(self):
+        # 读取配置并初始化“按道路统计过车数”的计数器。
+        # 逻辑：加载路网 roadnet 获取 road_id 列表；解析统计时间间隔；
+        # 为每个 road_id 建立车辆集合缓存与时间桶计数矩阵。
+        self.traffic_count_enabled = bool(self.dic_traffic_env_conf.get("ENABLE_TRAFFIC_COUNT", False))
+        if not self.traffic_count_enabled:
+            self.traffic_count_intervals = []
+            self.traffic_counts_by_interval = {}
+            self._traffic_prev_road_vehicle_sets = None
+            self._traffic_curr_road_vehicle_sets = None
+            return
+
+        # 加载 roadnet，拿到所有 road_id 作为统计维度
+        roadnet_path = os.path.join(self.path_to_work_directory, self.dic_traffic_env_conf["ROADNET_FILE"])
+        try:
+            with open(roadnet_path) as json_data:
+                roadnet = json.load(json_data)
+            self.traffic_road_ids = [road["id"] for road in roadnet.get("roads", [])]
+        except Exception as exc:
+            print(f"Traffic count disabled: failed to load roadnet ({exc})")
+            self.traffic_count_enabled = False
+            return
+
+        if not self.traffic_road_ids:
+            print("Traffic count disabled: no roads found in roadnet.")
+            self.traffic_count_enabled = False
+            return
+
+        # 解析统计周期（秒），支持单值或列表
+        intervals = self.dic_traffic_env_conf.get("TRAFFIC_COUNT_INTERVALS", None)
+        if intervals is None:
+            intervals = self.dic_traffic_env_conf.get("TRAFFIC_COUNT_INTERVAL_SECONDS", [60, 3600])
+        if isinstance(intervals, int):
+            intervals = [intervals]
+        intervals = [int(x) for x in intervals if int(x) > 0]
+        if not intervals:
+            print("Traffic count disabled: no valid intervals configured.")
+            self.traffic_count_enabled = False
+            return
+
+        # road_id 到列索引的映射，用于计数矩阵索引
+        self.traffic_road_id_to_index = {road_id: idx for idx, road_id in enumerate(self.traffic_road_ids)}
+        num_roads = len(self.traffic_road_ids)
+        total_run = int(self.dic_traffic_env_conf.get("RUN_COUNTS", 0))
+        self.traffic_count_intervals = sorted(set(intervals))
+        self.traffic_counts_by_interval = {}
+        for interval in self.traffic_count_intervals:
+            # 每个 interval 对应一个二维数组：行是时间桶，列是道路
+            num_bins = max(1, (total_run + interval - 1) // interval) if total_run else 1
+            self.traffic_counts_by_interval[interval] = np.zeros((num_bins, num_roads), dtype=int)
+        # 每条道路维护“上一步/当前步”的车辆集合，用来计算新增车辆数
+        self._traffic_prev_road_vehicle_sets = [set() for _ in range(num_roads)]
+        self._traffic_curr_road_vehicle_sets = [set() for _ in range(num_roads)]
+
+        # 计数 CSV 的时间戳起点
+        base_date = self.dic_traffic_env_conf.get("TRAFFIC_COUNT_BASE_DATE", "1970-01-01 00:00:00")
+        try:
+            self.traffic_base_dt = datetime.strptime(base_date, "%Y-%m-%d %H:%M:%S")
+        except ValueError:
+            print(f"Invalid TRAFFIC_COUNT_BASE_DATE: {base_date}, defaulting to 1970-01-01 00:00:00")
+            self.traffic_base_dt = datetime(1970, 1, 1)
+
+    def _update_traffic_counts(self):
+        # 核心计数逻辑：把 lane->road 聚合为 road->车辆集合，
+        # 然后用“当前集合”大小来表示当前道路上车辆数。
+        if not self.traffic_count_enabled or self.system_states is None:
+            return
+
+        total_run = int(self.dic_traffic_env_conf.get("RUN_COUNTS", 0))
+        current_time = int(self.get_current_time())
+        if total_run and current_time >= total_run:
+            return
+
+        if not self.traffic_counts_by_interval:
+            return
+
+        # 清空本步集合缓存
+        for s in self._traffic_curr_road_vehicle_sets:
+            s.clear()
+        # 将 lane_id 映射到 road_id（去掉 lane 后缀），按道路聚合车辆
+        lane_vehicles = self.system_states.get("get_lane_vehicles", {})
+        for lane_id, vehicle_ids in lane_vehicles.items():
+            road_id = lane_id.rsplit("_", 1)[0]
+            idx = self.traffic_road_id_to_index.get(road_id)
+            if idx is None or not vehicle_ids:
+                continue
+            self._traffic_curr_road_vehicle_sets[idx].update(vehicle_ids)
+
+        # 计算每个 interval 当前所在的时间桶
+        interval_bins = {
+            interval: current_time // interval for interval in self.traffic_count_intervals
+        }
+
+        for idx, current_set in enumerate(self._traffic_curr_road_vehicle_sets):
+            if not current_set:
+                continue
+            # 当前道路上车辆数 = 当前集合大小
+            current_count = len(current_set)
+            for interval, bin_idx in interval_bins.items():
+                counts = self.traffic_counts_by_interval.get(interval)
+                if counts is None or bin_idx >= counts.shape[0]:
+                    continue
+                # 把当前车辆数写到对应道路、对应时间桶（覆盖同一桶内之前的值）
+                counts[bin_idx, idx] = current_count
+
+        # 交换缓存：当前集合变为上一步集合，等待下一次统计
+        self._traffic_prev_road_vehicle_sets, self._traffic_curr_road_vehicle_sets = (
+            self._traffic_curr_road_vehicle_sets,
+            self._traffic_prev_road_vehicle_sets,
+        )
+
+    @staticmethod
+    def _interval_suffix(interval_seconds):
+        if interval_seconds == 60:
+            return "minute"
+        if interval_seconds == 3600:
+            return "hour"
+        return f"{interval_seconds}s"
+
+    def _write_traffic_count_csv(self, counts, output_path, interval_seconds):
+        if counts is None or not self.traffic_road_ids:
+            return
+        base_dt = self.traffic_base_dt or datetime(1970, 1, 1)
+        dates = [
+            (base_dt + timedelta(seconds=i * interval_seconds)).strftime("%Y-%m-%d %H:%M:%S")
+            for i in range(counts.shape[0])
+        ]
+        df = pd.DataFrame(counts, columns=self.traffic_road_ids)
+        df.insert(0, "date", dates)
+        if self.dic_traffic_env_conf.get("TRAFFIC_COUNT_ADD_TOTAL", True):
+            df["OT"] = counts.sum(axis=1)
+        df.to_csv(output_path, index=False)
+
+    def dump_traffic_counts(self):
+        # 按 interval 导出“按道路过车数”CSV
+        if not self.traffic_count_enabled:
+            return
+        output_dir = self.dic_traffic_env_conf.get("TRAFFIC_COUNT_OUTPUT_DIR", self.path_to_work_directory)
+        os.makedirs(output_dir, exist_ok=True)
+        base_name = self.dic_traffic_env_conf.get("TRAFFIC_COUNT_BASENAME", "traffic_counts")
+        for interval in self.traffic_count_intervals:
+            suffix = self._interval_suffix(interval)
+            out_path = os.path.join(output_dir, f"{base_name}_{suffix}.csv")
+            self._write_traffic_count_csv(self.traffic_counts_by_interval.get(interval), out_path, interval)
+
     def step(self, action):
 
         step_start_time = time.time()
@@ -785,6 +941,8 @@ class CityFlowEnv:
 
         for inter in self.list_intersection:
             inter.update_current_measurements(self.system_states)
+        # 每个仿真步更新“按道路过车数”统计
+        self._update_traffic_counts()
 
     def get_feature(self):
         list_feature = [inter.get_feature() for inter in self.list_intersection]
@@ -825,6 +983,7 @@ class CityFlowEnv:
             dic_vehicle = self.list_intersection[inter_ind].get_dic_vehicle_arrive_leave_time()
             df = pd.DataFrame.from_dict(dic_vehicle, orient="index")
             df.to_csv(path_to_log_file, na_rep="nan")
+        self.dump_traffic_counts()
 
     def batch_log(self, start, stop):
         for inter_ind in range(start, stop):

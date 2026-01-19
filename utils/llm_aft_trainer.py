@@ -205,7 +205,7 @@ class LLM_CGPR_Collector:
         state_action_log = [[] for _ in range(len(state))]
 
         # data buffer for training data collection
-        self.llm_model.eval()
+        # self.llm_model.eval()
         for step_num in tqdm(range(int(total_run_cnt / self.dic_traffic_env_conf['MIN_ACTION_TIME']))):
             if done or current_time >= total_run_cnt:
                 break
@@ -518,7 +518,7 @@ class LLM_CGPR_Trainer:
         start_time = time.time()
         state_action_log = [[] for _ in range(len(state))]
 
-        self.llm_model.eval()
+        # self.llm_model.eval()
         for step_num in tqdm(range(int(total_run_cnt / self.dic_traffic_env_conf['MIN_ACTION_TIME']))):
             if done or current_time >= total_run_cnt:
                 break
@@ -788,7 +788,7 @@ class LLM_Inference:
         start_time = time.time()
         state_action_log = [[] for _ in range(len(state))]
 
-        self.llm_model.eval()
+        # self.llm_model.eval()
         for step_num in tqdm(range(int(total_run_cnt / self.dic_traffic_env_conf['MIN_ACTION_TIME']))):
             if done or current_time >= total_run_cnt:
                 break
@@ -997,6 +997,23 @@ class LLM_Inference_VLLM:
         self.fail_logs = []
         self.initialize()
 
+    def _infer_tensor_parallel_size(self):
+        visible = os.environ.get("CUDA_VISIBLE_DEVICES")
+        if visible:
+            ids = [x.strip() for x in visible.split(",") if x.strip() != ""]
+            if len(ids) == 1 and "-" in ids[0]:
+                parts = ids[0].split("-")
+                if len(parts) == 2 and parts[0].isdigit() and parts[1].isdigit():
+                    start = int(parts[0])
+                    end = int(parts[1])
+                    if end >= start:
+                        return end - start + 1
+            if ids:
+                return len(ids)
+
+        count = torch.cuda.device_count()
+        return count if count > 0 else 1
+
     def initialize_llm(self):
         device_map = "auto"
 
@@ -1029,10 +1046,25 @@ class LLM_Inference_VLLM:
                 "max_new_tokens": self.dic_agent_conf["NEW_MAX_TOKENS"]
             }
         else:
+            tensor_parallel_size = self.dic_agent_conf.get("TENSOR_PARALLEL_SIZE", 0)
+            try:
+                tensor_parallel_size = int(tensor_parallel_size)
+            except (TypeError, ValueError):
+                tensor_parallel_size = 0
+            if tensor_parallel_size < 1:
+                tensor_parallel_size = self._infer_tensor_parallel_size()
+
+            available_gpus = torch.cuda.device_count()
+            if available_gpus > 0 and tensor_parallel_size > available_gpus:
+                print(f"Warning: TENSOR_PARALLEL_SIZE={tensor_parallel_size} > visible GPUs={available_gpus}; "
+                      f"clamping to {available_gpus}.")
+                tensor_parallel_size = available_gpus
+
             self.llm_model = vllm.LLM(
                 model=llm_path,
                 tokenizer=llm_path,
-                dtype=torch.bfloat16
+                dtype=torch.bfloat16,
+                tensor_parallel_size=max(tensor_parallel_size, 1)
             )
 
             # init tokenizer
@@ -1080,7 +1112,7 @@ class LLM_Inference_VLLM:
         start_time = time.time()
         state_action_log = [[] for _ in range(len(state))]
 
-        self.llm_model.eval()
+        # self.llm_model.eval()
         for step_num in tqdm(range(int(total_run_cnt / self.dic_traffic_env_conf['MIN_ACTION_TIME']))):
             if done or current_time >= total_run_cnt:
                 break
