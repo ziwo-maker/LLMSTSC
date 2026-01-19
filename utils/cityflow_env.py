@@ -4,12 +4,14 @@ import json
 import sys
 import pandas as pd
 import os
+import csv
 import cityflow as engine
 import time
 from datetime import datetime, timedelta
 from multiprocessing import Process
 from .my_utils import load_json, calculate_road_length
 from functools import reduce
+from typing import Dict, List, Optional, Set, Tuple
 
 location_dict = {"North": "N", "South": "S", "East": "E", "West": "W"}
 location_dict_reverse = {"N": "North", "S": "South", "E": "East", "W": "West"}
@@ -503,6 +505,8 @@ class CityFlowEnv:
         self.lane_length = None
         self.waiting_vehicle_list = {}
         self.traffic_count_enabled = False
+        self.traffic_count_mode = "road"  # "road" | "intersection_movement"
+        self.traffic_count_output_format = "csv"  # "csv" | "jsonl"
         self.traffic_road_ids = []
         self.traffic_road_id_to_index = {}
         self.traffic_count_intervals = []
@@ -510,6 +514,9 @@ class CityFlowEnv:
         self._traffic_prev_road_vehicle_sets = None
         self._traffic_curr_road_vehicle_sets = None
         self.traffic_base_dt = None
+        self.traffic_intersection_ids = []
+        self.traffic_movement_keys = ["NT", "NL", "ST", "SL", "ET", "EL", "WT", "WL"]
+        self._traffic_lane_to_feature_indices = None  # Dict[lane_id, List[col_idx]]
 
         # check min action time
         if self.dic_traffic_env_conf["MIN_ACTION_TIME"] <= self.dic_traffic_env_conf["YELLOW_TIME"]:
@@ -592,6 +599,13 @@ class CityFlowEnv:
 
 
     def create_intersection_dict(self):
+        """
+        基于 roadnet 构建 self.intersection_dict（主要用于 LLM/日志侧的路口结构信息）。
+
+        新增字段：
+        - intersection["roads"][road_id]["num_lanes"]：该 road 在 roadnet 中的总车道数（len(road["lanes"])）。
+        - intersection["movement_lane_counts"]：8 个 movement（每方向直行/左转：NT/NL/.../WL）的车道数量统计。
+        """
         roadnet = load_json(f'./{self.dic_path["PATH_TO_DATA"]}/{self.dic_traffic_env_conf["ROADNET_FILE"]}')
 
         intersections_raw = roadnet["intersections"]
@@ -630,6 +644,8 @@ class CityFlowEnv:
                 for r in inter["roads"]:
                     roads[r] = {"location": None, "type": "incoming", "go_straight": None, "turn_left": None,
                                 "turn_right": None, "length": None, "max_speed": None,
+                                # 该 road 在 roadnet 中的总车道数（len(road["lanes"])）
+                                "num_lanes": None,
                                 "lanes": {"go_straight": [], "turn_left": [], "turn_right": []}}
 
                 # collect road length speed info & init road location
@@ -639,6 +655,7 @@ class CityFlowEnv:
                     if r_id in roads:
                         roads[r_id]["length"] = calculate_road_length(r["points"])
                         roads[r_id]["max_speed"] = r["lanes"][0]["maxSpeed"]
+                        roads[r_id]["num_lanes"] = len(r.get("lanes", []) or [])
                         for env_road_location in intersection.dic_entering_approach_to_edge:
                             if intersection.dic_entering_approach_to_edge[env_road_location] == r_id:
                                 roads[r_id]["location"] = location_dict_reverse[env_road_location]
@@ -702,7 +719,28 @@ class CityFlowEnv:
                                 if lane_id not in roads[r]["lanes"]["turn_right"]:
                                     roads[r]["lanes"]["turn_right"].append(lane_id)
 
+                # 额外记录：按“8个 movement(每个方向的直行/左转)”统计车道数量，便于 LLM/日志侧使用。
+                # 说明：一个路口在 roadnet 中通常有 8 条 road（4 进 4 出）。
+                # 这里的 movement 统计基于 roadLinks 的 startRoad（即进入路口的道路），
+                # 因此会得到 NT/NL/ST/SL/ET/EL/WT/WL 共 8 个数。
+                for r_id in roads:
+                    roads[r_id]["lanes"]["go_straight"] = sorted(roads[r_id]["lanes"]["go_straight"])
+                    roads[r_id]["lanes"]["turn_left"] = sorted(roads[r_id]["lanes"]["turn_left"])
+                    roads[r_id]["lanes"]["turn_right"] = sorted(roads[r_id]["lanes"]["turn_right"])
+
+                movement_lane_counts = {k: 0 for k in ["NT", "NL", "ST", "SL", "ET", "EL", "WT", "WL"]}
+                for r_id, r_info in roads.items():
+                    location = r_info.get("location")
+                    if not location:
+                        continue
+                    # 只对“有 movement lane 记录的道路”做统计（通常是 startRoad/进入路口的道路）
+                    if not (r_info["lanes"]["go_straight"] or r_info["lanes"]["turn_left"] or r_info["lanes"]["turn_right"]):
+                        continue
+                    movement_lane_counts[f"{location_dict[location]}T"] = len(r_info["lanes"]["go_straight"])
+                    movement_lane_counts[f"{location_dict[location]}L"] = len(r_info["lanes"]["turn_left"])
+
                 agent_intersections[inter_id]["roads"] = roads
+                agent_intersections[inter_id]["movement_lane_counts"] = movement_lane_counts
 
         self.intersection_dict = agent_intersections
 
@@ -718,19 +756,21 @@ class CityFlowEnv:
             self._traffic_curr_road_vehicle_sets = None
             return
 
+        self.traffic_count_mode = str(self.dic_traffic_env_conf.get("TRAFFIC_COUNT_MODE", "road")).strip()
+        self.traffic_count_output_format = str(
+            self.dic_traffic_env_conf.get(
+                "TRAFFIC_COUNT_OUTPUT_FORMAT",
+                "jsonl" if self.traffic_count_mode == "intersection_movement" else "csv",
+            )
+        ).strip()
+
         # 加载 roadnet，拿到所有 road_id 作为统计维度
         roadnet_path = os.path.join(self.path_to_work_directory, self.dic_traffic_env_conf["ROADNET_FILE"])
         try:
             with open(roadnet_path) as json_data:
                 roadnet = json.load(json_data)
-            self.traffic_road_ids = [road["id"] for road in roadnet.get("roads", [])]
         except Exception as exc:
             print(f"Traffic count disabled: failed to load roadnet ({exc})")
-            self.traffic_count_enabled = False
-            return
-
-        if not self.traffic_road_ids:
-            print("Traffic count disabled: no roads found in roadnet.")
             self.traffic_count_enabled = False
             return
 
@@ -746,19 +786,15 @@ class CityFlowEnv:
             self.traffic_count_enabled = False
             return
 
-        # road_id 到列索引的映射，用于计数矩阵索引
-        self.traffic_road_id_to_index = {road_id: idx for idx, road_id in enumerate(self.traffic_road_ids)}
-        num_roads = len(self.traffic_road_ids)
         total_run = int(self.dic_traffic_env_conf.get("RUN_COUNTS", 0))
         self.traffic_count_intervals = sorted(set(intervals))
         self.traffic_counts_by_interval = {}
-        for interval in self.traffic_count_intervals:
-            # 每个 interval 对应一个二维数组：行是时间桶，列是道路
-            num_bins = max(1, (total_run + interval - 1) // interval) if total_run else 1
-            self.traffic_counts_by_interval[interval] = np.zeros((num_bins, num_roads), dtype=int)
-        # 每条道路维护“上一步/当前步”的车辆集合，用来计算新增车辆数
-        self._traffic_prev_road_vehicle_sets = [set() for _ in range(num_roads)]
-        self._traffic_curr_road_vehicle_sets = [set() for _ in range(num_roads)]
+
+        if self.traffic_count_mode == "intersection_movement":
+            self._init_traffic_counter_intersection_movement(roadnet, total_run)
+        else:
+            self.traffic_count_mode = "road"
+            self._init_traffic_counter_road(roadnet, total_run)
 
         # 计数 CSV 的时间戳起点
         base_date = self.dic_traffic_env_conf.get("TRAFFIC_COUNT_BASE_DATE", "1970-01-01 00:00:00")
@@ -768,9 +804,109 @@ class CityFlowEnv:
             print(f"Invalid TRAFFIC_COUNT_BASE_DATE: {base_date}, defaulting to 1970-01-01 00:00:00")
             self.traffic_base_dt = datetime(1970, 1, 1)
 
+    def _init_traffic_counter_road(self, roadnet, total_run: int):
+        self.traffic_road_ids = [road["id"] for road in roadnet.get("roads", [])]
+        if not self.traffic_road_ids:
+            print("Traffic count disabled: no roads found in roadnet.")
+            self.traffic_count_enabled = False
+            return
+
+        self.traffic_intersection_ids = []
+        self._traffic_lane_to_feature_indices = None
+
+        self.traffic_road_id_to_index = {road_id: idx for idx, road_id in enumerate(self.traffic_road_ids)}
+        num_roads = len(self.traffic_road_ids)
+        for interval in self.traffic_count_intervals:
+            num_bins = max(1, (total_run + interval - 1) // interval) if total_run else 1
+            self.traffic_counts_by_interval[interval] = np.zeros((num_bins, num_roads), dtype=int)
+        self._traffic_prev_road_vehicle_sets = [set() for _ in range(num_roads)]
+        self._traffic_curr_road_vehicle_sets = [set() for _ in range(num_roads)]
+
+    def _init_traffic_counter_intersection_movement(self, roadnet, total_run: int):
+        self.traffic_road_ids = []
+        self.traffic_road_id_to_index = {}
+        self._traffic_prev_road_vehicle_sets = None
+        self._traffic_curr_road_vehicle_sets = None
+
+        movement_keys = self.dic_traffic_env_conf.get("TRAFFIC_COUNT_MOVEMENT_KEYS", None)
+        if movement_keys is not None:
+            self.traffic_movement_keys = [str(k).strip() for k in movement_keys if str(k).strip()]
+
+        env_intersections = {inter.inter_name: inter for inter in (self.list_intersection or [])}
+        if not env_intersections:
+            print("Traffic count disabled: intersections not initialized.")
+            self.traffic_count_enabled = False
+            return
+
+        # 交叉口 -> movement -> lane_id 列表
+        inter_to_movement_lanes: Dict[str, Dict[str, List[str]]] = {}
+        for inter in roadnet.get("intersections", []) or []:
+            inter_id = inter.get("id")
+            if not inter_id or inter.get("virtual"):
+                continue
+            env_inter = env_intersections.get(inter_id)
+            if env_inter is None:
+                continue
+
+            start_road_to_prefix: Dict[str, str] = {}
+            for prefix, road_id in (env_inter.dic_entering_approach_to_edge or {}).items():
+                if road_id:
+                    start_road_to_prefix[road_id] = prefix  # prefix in {"N","S","E","W"}
+
+            movement_lanes = {k: [] for k in self.traffic_movement_keys}
+            for road_link in inter.get("roadLinks", []) or []:
+                start_road = road_link.get("startRoad")
+                if not start_road or start_road not in start_road_to_prefix:
+                    continue
+                link_type = road_link.get("type")
+                if link_type not in ("go_straight", "turn_left"):
+                    continue
+                movement_suffix = "T" if link_type == "go_straight" else "L"
+                movement_key = f"{start_road_to_prefix[start_road]}{movement_suffix}"
+                if movement_key not in movement_lanes:
+                    continue
+                for lane_link in road_link.get("laneLinks", []) or []:
+                    lane_idx = lane_link.get("startLaneIndex")
+                    if lane_idx is None:
+                        continue
+                    movement_lanes[movement_key].append(f"{start_road}_{int(lane_idx)}")
+
+            for k in movement_lanes:
+                movement_lanes[k] = sorted(set(movement_lanes[k]))
+            inter_to_movement_lanes[inter_id] = movement_lanes
+
+        def _intersection_sort_key(inter_id: str):
+            try:
+                _, x, y = inter_id.split("_", 2)
+                return (int(x), int(y))
+            except Exception:
+                return (inter_id,)
+
+        self.traffic_intersection_ids = sorted(inter_to_movement_lanes.keys(), key=_intersection_sort_key)
+        if not self.traffic_intersection_ids:
+            print("Traffic count disabled: no valid intersections found for movement logging.")
+            self.traffic_count_enabled = False
+            return
+
+        num_features = len(self.traffic_intersection_ids) * len(self.traffic_movement_keys)
+        for interval in self.traffic_count_intervals:
+            num_bins = max(1, (total_run + interval - 1) // interval) if total_run else 1
+            self.traffic_counts_by_interval[interval] = np.zeros((num_bins, num_features), dtype=int)
+
+        lane_to_feature_indices: Dict[str, List[int]] = {}
+        for inter_idx, inter_id in enumerate(self.traffic_intersection_ids):
+            movement_lanes = inter_to_movement_lanes.get(inter_id) or {}
+            base_col = inter_idx * len(self.traffic_movement_keys)
+            for mv_i, mv_key in enumerate(self.traffic_movement_keys):
+                col_idx = base_col + mv_i
+                for lane_id in movement_lanes.get(mv_key, []) or []:
+                    lane_to_feature_indices.setdefault(lane_id, []).append(col_idx)
+        self._traffic_lane_to_feature_indices = lane_to_feature_indices
+
     def _update_traffic_counts(self):
-        # 核心计数逻辑：把 lane->road 聚合为 road->车辆集合，
-        # 然后用“当前集合”大小来表示当前道路上车辆数。
+        # 核心计数逻辑（两种模式）：
+        # - road：lane->road 聚合，写“道路上车辆数”
+        # - intersection_movement：lane->(intersection,movement) 聚合，写“路口 8 个 movement 的车辆数”
         if not self.traffic_count_enabled or self.system_states is None:
             return
 
@@ -782,11 +918,34 @@ class CityFlowEnv:
         if not self.traffic_counts_by_interval:
             return
 
-        # 清空本步集合缓存
+        interval_bins = {interval: current_time // interval for interval in self.traffic_count_intervals}
+        lane_vehicles = self.system_states.get("get_lane_vehicles", {})
+
+        if self.traffic_count_mode == "intersection_movement":
+            if not self.traffic_intersection_ids or not self._traffic_lane_to_feature_indices:
+                return
+            num_features = len(self.traffic_intersection_ids) * len(self.traffic_movement_keys)
+            feature_counts = np.zeros((num_features,), dtype=int)
+            for lane_id, vehicle_ids in lane_vehicles.items():
+                col_idxs = self._traffic_lane_to_feature_indices.get(lane_id)
+                if not col_idxs:
+                    continue
+                c = len(vehicle_ids or [])
+                if c <= 0:
+                    continue
+                for col_idx in col_idxs:
+                    feature_counts[col_idx] += c
+            for interval, bin_idx in interval_bins.items():
+                counts = self.traffic_counts_by_interval.get(interval)
+                if counts is None or bin_idx >= counts.shape[0]:
+                    continue
+                counts[bin_idx, :] = feature_counts
+            return
+
+        # road 模式：清空本步集合缓存
         for s in self._traffic_curr_road_vehicle_sets:
             s.clear()
         # 将 lane_id 映射到 road_id（去掉 lane 后缀），按道路聚合车辆
-        lane_vehicles = self.system_states.get("get_lane_vehicles", {})
         for lane_id, vehicle_ids in lane_vehicles.items():
             road_id = lane_id.rsplit("_", 1)[0]
             idx = self.traffic_road_id_to_index.get(road_id)
@@ -794,24 +953,16 @@ class CityFlowEnv:
                 continue
             self._traffic_curr_road_vehicle_sets[idx].update(vehicle_ids)
 
-        # 计算每个 interval 当前所在的时间桶
-        interval_bins = {
-            interval: current_time // interval for interval in self.traffic_count_intervals
-        }
-
         for idx, current_set in enumerate(self._traffic_curr_road_vehicle_sets):
             if not current_set:
                 continue
-            # 当前道路上车辆数 = 当前集合大小
             current_count = len(current_set)
             for interval, bin_idx in interval_bins.items():
                 counts = self.traffic_counts_by_interval.get(interval)
                 if counts is None or bin_idx >= counts.shape[0]:
                     continue
-                # 把当前车辆数写到对应道路、对应时间桶（覆盖同一桶内之前的值）
                 counts[bin_idx, idx] = current_count
 
-        # 交换缓存：当前集合变为上一步集合，等待下一次统计
         self._traffic_prev_road_vehicle_sets, self._traffic_curr_road_vehicle_sets = (
             self._traffic_curr_road_vehicle_sets,
             self._traffic_prev_road_vehicle_sets,
@@ -839,8 +990,29 @@ class CityFlowEnv:
             df["OT"] = counts.sum(axis=1)
         df.to_csv(output_path, index=False)
 
+    def _write_traffic_count_intersection_movement_jsonl(self, counts, output_path, interval_seconds):
+        if counts is None or not self.traffic_intersection_ids:
+            return
+        base_dt = self.traffic_base_dt or datetime(1970, 1, 1)
+        movement_keys = self.traffic_movement_keys
+        num_mv = len(movement_keys)
+        with open(output_path, "w", encoding="utf-8") as f:
+            for bin_idx in range(counts.shape[0]):
+                date_str = (base_dt + timedelta(seconds=bin_idx * interval_seconds)).strftime("%Y-%m-%d %H:%M:%S")
+                row = counts[bin_idx, :]
+                for inter_idx, inter_id in enumerate(self.traffic_intersection_ids):
+                    offset = inter_idx * num_mv
+                    movement_counts = {k: int(row[offset + mv_i]) for mv_i, k in enumerate(movement_keys)}
+                    record = {
+                        "date": date_str,
+                        "interval_s": int(interval_seconds),
+                        "intersection_id": inter_id,
+                        "movement_counts": movement_counts,
+                    }
+                    f.write(json.dumps(record, ensure_ascii=False) + "\n")
+
     def dump_traffic_counts(self):
-        # 按 interval 导出“按道路过车数”CSV
+        # 按 interval 导出交通统计（按道路或按路口-8movement）。
         if not self.traffic_count_enabled:
             return
         output_dir = self.dic_traffic_env_conf.get("TRAFFIC_COUNT_OUTPUT_DIR", self.path_to_work_directory)
@@ -848,8 +1020,53 @@ class CityFlowEnv:
         base_name = self.dic_traffic_env_conf.get("TRAFFIC_COUNT_BASENAME", "traffic_counts")
         for interval in self.traffic_count_intervals:
             suffix = self._interval_suffix(interval)
-            out_path = os.path.join(output_dir, f"{base_name}_{suffix}.csv")
-            self._write_traffic_count_csv(self.traffic_counts_by_interval.get(interval), out_path, interval)
+            if self.traffic_count_mode == "intersection_movement" and self.traffic_count_output_format == "jsonl":
+                out_path = os.path.join(output_dir, f"{base_name}_{suffix}.jsonl")
+                self._write_traffic_count_intersection_movement_jsonl(
+                    self.traffic_counts_by_interval.get(interval), out_path, interval
+                )
+            else:
+                out_path = os.path.join(output_dir, f"{base_name}_{suffix}.csv")
+                self._write_traffic_count_csv(self.traffic_counts_by_interval.get(interval), out_path, interval)
+
+    def dump_lane_counts(self):
+        """
+        导出“车道数量”相关的静态表格（与仿真步无关，方便你直接用 CSV 查看）。
+
+        输出文件（默认写到 PATH_TO_WORK_DIRECTORY）：
+        - intersection_movement_lane_counts.csv：每个路口 8 个 movement（NT/NL/.../WL）的车道数量
+        - road_num_lanes.csv：每条 road 的总车道数量（roadnet 中 len(road["lanes"])）
+        """
+        if self.intersection_dict is None:
+            self.create_intersection_dict()
+        if not self.intersection_dict:
+            return
+
+        output_dir = self.dic_traffic_env_conf.get("LANE_COUNT_OUTPUT_DIR", self.path_to_work_directory)
+        os.makedirs(output_dir, exist_ok=True)
+
+        movement_keys = ["NT", "NL", "ST", "SL", "ET", "EL", "WT", "WL"]
+        inter_out = os.path.join(output_dir, "intersection_movement_lane_counts.csv")
+        with open(inter_out, "w", newline="") as f:
+            writer = csv.writer(f)
+            writer.writerow(["intersection_id", *movement_keys])
+            for inter_id in sorted(self.intersection_dict.keys()):
+                counts = self.intersection_dict[inter_id].get("movement_lane_counts") or {}
+                writer.writerow([inter_id] + [int(counts.get(k, 0) or 0) for k in movement_keys])
+
+        road_out = os.path.join(output_dir, "road_num_lanes.csv")
+        with open(road_out, "w", newline="") as f:
+            writer = csv.writer(f)
+            writer.writerow(["intersection_id", "road_id", "location", "num_lanes"])
+            for inter_id in sorted(self.intersection_dict.keys()):
+                roads = (self.intersection_dict[inter_id].get("roads") or {}).items()
+                for road_id, road_info in sorted(roads):
+                    writer.writerow([
+                        inter_id,
+                        road_id,
+                        road_info.get("location"),
+                        road_info.get("num_lanes"),
+                    ])
 
     def step(self, action):
 
@@ -984,6 +1201,7 @@ class CityFlowEnv:
             df = pd.DataFrame.from_dict(dic_vehicle, orient="index")
             df.to_csv(path_to_log_file, na_rep="nan")
         self.dump_traffic_counts()
+        self.dump_lane_counts()
 
     def batch_log(self, start, stop):
         for inter_ind in range(start, stop):

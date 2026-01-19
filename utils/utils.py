@@ -39,8 +39,19 @@ def pipeline_wrapper(dic_agent_conf, dic_traffic_env_conf, dic_path, roadnet, tr
         all_travel_time.append(round_results['test_avg_travel_time_over'])
 
         # delete junk
-        cmd_delete_model = 'find <dir> -type f ! -name "round_<round>_inter_*.h5" -exec rm -rf {} \;'.replace("<dir>", dic_path["PATH_TO_MODEL"]).replace("<round>", str(int(dic_traffic_env_conf["NUM_ROUNDS"] - 1)))
-        cmd_delete_work = 'find <dir> -type f ! -name "state_action.json" -exec rm -rf {} \;'.replace("<dir>", dic_path["PATH_TO_WORK_DIRECTORY"])
+        cmd_delete_model = 'find <dir> -type f ! -name "round_<round>_inter_*.h5" -exec rm -rf {} \\;'.replace("<dir>", dic_path["PATH_TO_MODEL"]).replace("<round>", str(int(dic_traffic_env_conf["NUM_ROUNDS"] - 1)))
+        traffic_base_name = dic_traffic_env_conf.get(
+            "TRAFFIC_COUNT_BASENAME",
+            config.dic_traffic_env_conf.get("TRAFFIC_COUNT_BASENAME", "traffic_counts"),
+        )
+        traffic_pattern_csv = f"{traffic_base_name}_*.csv"
+        traffic_pattern_jsonl = f"{traffic_base_name}_*.jsonl"
+        cmd_delete_work = (
+            'find <dir> -type f ! -name "state_action.json" ! -name "<traffic_pattern_csv>" ! -name "<traffic_pattern_jsonl>" -exec rm -rf {} \\;'
+            .replace("<dir>", dic_path["PATH_TO_WORK_DIRECTORY"])
+            .replace("<traffic_pattern_csv>", traffic_pattern_csv)
+            .replace("<traffic_pattern_jsonl>", traffic_pattern_jsonl)
+        )
         os.system(cmd_delete_model)
         os.system(cmd_delete_work)
 
@@ -91,11 +102,13 @@ def oneline_wrapper(dic_agent_conf, dic_traffic_env_conf, dic_path, roadnet, tra
             "TRAFFIC_COUNT_BASENAME",
             config.dic_traffic_env_conf.get("TRAFFIC_COUNT_BASENAME", "traffic_counts"),
         )
-        traffic_pattern = f"{traffic_base_name}_*.csv"
+        traffic_pattern_csv = f"{traffic_base_name}_*.csv"
+        traffic_pattern_jsonl = f"{traffic_base_name}_*.jsonl"
         cmd_delete_work = (
-            'find <dir> -type f ! -name "state_action.json" ! -name "<traffic_pattern>" -exec rm -rf {} \\;'
+            'find <dir> -type f ! -name "state_action.json" ! -name "<traffic_pattern_csv>" ! -name "<traffic_pattern_jsonl>" -exec rm -rf {} \\;'
             .replace("<dir>", dic_path["PATH_TO_WORK_DIRECTORY"])
-            .replace("<traffic_pattern>", traffic_pattern)
+            .replace("<traffic_pattern_csv>", traffic_pattern_csv)
+            .replace("<traffic_pattern_jsonl>", traffic_pattern_jsonl)
         )
         os.system(cmd_delete_model)
         os.system(cmd_delete_work)

@@ -81,6 +81,8 @@ def main(in_args):
         "NUM_ROW": NUM_ROW,
         "NUM_COL": NUM_COL,
         "ENABLE_TRAFFIC_COUNT": True,
+        "TRAFFIC_COUNT_MODE": "intersection_movement",
+        "TRAFFIC_COUNT_OUTPUT_FORMAT": "jsonl",
         "TRAFFIC_COUNT_INTERVALS": [in_args.traffic_count_interval],
         "TRAFFIC_COUNT_ADD_TOTAL": True,
         "TRAFFIC_COUNT_BASENAME": "traffic_counts",

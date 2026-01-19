@@ -14,6 +14,9 @@ CUDA_VISIBLE_DEVICES=0,1,2,3 python run_open_LLM_with_vllm.py     --llm_model ge
 
 CUDA_VISIBLE_DEVICES=0,1,2,3 python run_random.py        --dataset jinan     --traffic_file anon_3_4_jinan_synthetic_24h_6000.json
 
+
+CUDA_VISIBLE_DEVICES=0,1,2,3 python run_random.py        --dataset jinan     --traffic_file anon_3_4_jinan_real.json
+
 # 定义通用参数
 LLM_MODEL="gemma-3-27B"
 LLM_PATH="/home/data/model/gemma-3-27B/"
@@ -27,7 +30,7 @@ echo "运行 Hangzhou 数据集..."
 python run_open_LLM.py \
     --llm_model gemma-3-27B \
     --llm_path /home/data/model/gemma-3-27B/ \
-    --dataset jinan \
+    --dataset jinan \   
     --traffic_file anon_3_4_jinan_real_2000.json \
     --proj_name "$PROJ_NAME"
 

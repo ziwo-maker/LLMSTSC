@@ -134,10 +134,14 @@ def get_state(roads, env):
         # incoming lanes
         else:
             queue_len = 0.0
-            for lane in range(2):
+            try:
+                num_lanes = int(roads[r].get("num_lanes")) if roads[r].get("num_lanes") is not None else 2
+            except (TypeError, ValueError):
+                num_lanes = 2
+            for lane in range(max(0, num_lanes)):
                 queue_len += lane_queues[f"{r}_{lane}"]
             statistic_state_incoming[location_dict_short[roads[r]['location']]] = {"cells": [0 for _ in range(3)], "queue_len": queue_len}
-            incoming_lanes = [f"{r}_{idx}" for idx in range(2)]
+            incoming_lanes = [f"{r}_{idx}" for idx in range(max(0, num_lanes))]
 
             for lane in incoming_lanes:
                 vehicles = lane_vehicles[lane]
@@ -304,15 +308,19 @@ def get_state_detail(roads, env):
 
         # 如果该路段是入向车道（incoming）
         else:
-            # 统计该路段两条入向车道的早到队列长度之和
+            # 统计该路段入向所有车道的早到队列长度之和（默认兼容旧逻辑：未提供 num_lanes 时按 2 处理）
             queue_len = 0.0
-            for lane in range(2):
+            try:
+                num_lanes = int(roads[r].get("num_lanes")) if roads[r].get("num_lanes") is not None else 2
+            except (TypeError, ValueError):
+                num_lanes = 2
+            for lane in range(max(0, num_lanes)):
                 queue_len += lane_queues[f"{r}_{lane}"]
             # 在 statistic_state_incoming 中为该方向（N/S/E/W 的短写）建立条目，cells 长度为 4（与出向保持一致），并记录 queue_len
             statistic_state_incoming[location_dict_short[roads[r]['location']]] = {"cells": [0 for _ in range(4)],
                                                                                    "queue_len": queue_len}
-            # 构造入向车道的 lane id 列表 (两条，索引 0 和 1)
-            incoming_lanes = [f"{r}_{idx}" for idx in range(2)]
+            # 构造入向车道的 lane id 列表（按 num_lanes）
+            incoming_lanes = [f"{r}_{idx}" for idx in range(max(0, num_lanes))]
 
             # 遍历入向车道上的每条车道
             for lane in incoming_lanes:
@@ -449,11 +457,15 @@ def get_state_three_segment(roads, env):
         # incoming lanes
         else:
             queue_len = 0.0
-            for lane in range(2):
+            try:
+                num_lanes = int(roads[r].get("num_lanes")) if roads[r].get("num_lanes") is not None else 2
+            except (TypeError, ValueError):
+                num_lanes = 2
+            for lane in range(max(0, num_lanes)):
                 queue_len += lane_queues[f"{r}_{lane}"]
             statistic_state_incoming[location_dict_short[roads[r]['location']]] = {"cells": [0 for _ in range(3)],
                                                                                    "queue_len": queue_len}
-            incoming_lanes = [f"{r}_{idx}" for idx in range(2)]
+            incoming_lanes = [f"{r}_{idx}" for idx in range(max(0, num_lanes))]
 
             for lane in incoming_lanes:
                 vehicles = lane_vehicles[lane]
