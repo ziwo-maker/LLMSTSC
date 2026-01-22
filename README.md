@@ -120,6 +120,24 @@ python run_open_LLM_with_vllm.py --llm_model LLM_MODEL_NAME_ONLY_FOR_LOG \
                                  --traffic_file anon_4_4_hangzhou_real.json \
                                  --proj_name TSCS
 ```
+
+### TimeVLM time-series image adapter
+
+```python
+from src.TimeVLM.ts_image_adapter import TimeSeriesImageAdapter
+import torch
+
+adapter = TimeSeriesImageAdapter(image_size=56, seq_len=25, periodicity=24)
+
+series = torch.randn(25, 2)  # (L, C)
+images = adapter.generate(series)  # torch.uint8, [1, 3, H, W]
+
+batch = torch.randn(8, 25, 2)  # (B, L, C)
+images = adapter.generate(batch)
+
+# Returns a list of PIL images for multimodal processors.
+pil_images = adapter.generate_images(batch)
+```
 <a id="baselines"></a>
 
 ## 4 Baselines

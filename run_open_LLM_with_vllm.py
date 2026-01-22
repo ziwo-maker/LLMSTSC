@@ -10,8 +10,8 @@ from utils.utils import merge
 def parse_args():
     parser = argparse.ArgumentParser()
     parser.add_argument("--memo", type=str, default='LLMTLCSRun')
-    parser.add_argument("--llm_model", type=str, default="llama_cgpr_13b_jinan_1")
-    parser.add_argument("--llm_path", type=str, default="./ft_models/merged/llama_cgpr_13b_jinan_1")
+    parser.add_argument("--llm_model", type=str, default="gemma-3-27B")
+    parser.add_argument("--llm_path", type=str, default="/home/data/model/gemma-3-27B/")
     parser.add_argument("--num_rounds", type=int, default=1)
     parser.add_argument("--new_max_tokens", type=int, default=1024)
     parser.add_argument("--proj_name", type=str, default="LLM-TSCS-extreme")
@@ -21,6 +21,12 @@ def parse_args():
     parser.add_argument("--tensor_parallel_size", type=int, default=0)
     parser.add_argument("--dataset", type=str, default="template")
     parser.add_argument("--traffic_file", type=str, default="flow_main_stream.json")
+    parser.add_argument("--ts_image_service_url", type=str, default="")
+    parser.add_argument("--ts_image_seq_len", type=int, default=25)
+    parser.add_argument("--ts_image_token", type=str, default="<image>")
+    parser.add_argument("--ts_image_prompt_prefix", type=str, default="")
+    parser.add_argument("--ts_feature_mode", type=str, default="movement_total")
+    parser.add_argument("--ts_image_timeout", type=float, default=5.0)
 
     return parser.parse_args()
 
@@ -74,7 +80,13 @@ def main(in_args):
         "LLM_MODEL": in_args.llm_model,
         "LOG_DIR": f"./{in_args.llm_model}_logs",
         "NEW_MAX_TOKENS": in_args.new_max_tokens,
-        "TENSOR_PARALLEL_SIZE": in_args.tensor_parallel_size
+        "TENSOR_PARALLEL_SIZE": in_args.tensor_parallel_size,
+        "TS_IMAGE_SERVICE_URL": in_args.ts_image_service_url,
+        "TS_IMAGE_SEQ_LEN": in_args.ts_image_seq_len,
+        "TS_IMAGE_TOKEN": in_args.ts_image_token,
+        "TS_IMAGE_PROMPT_PREFIX": in_args.ts_image_prompt_prefix,
+        "TS_FEATURE_MODE": in_args.ts_feature_mode,
+        "TS_IMAGE_TIMEOUT": in_args.ts_image_timeout,
     }
 
     dic_traffic_env_conf_extra = {

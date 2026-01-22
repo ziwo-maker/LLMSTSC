@@ -77,14 +77,15 @@ class Model(nn.Module):
     def __init__(self, config, **kwargs):
         super(Model, self).__init__()
         self.config = config
-        # VLM 管理器：负责视觉-语言模型初始化与推理
+        # 保存 VLM 名称字符串，便于日志/外部识别 
+        # 图像嵌入由 Gemma-3 多模态模型负责
         self.vlm_manager = VLMManager(config)
         # Require GPU for this run; fail fast if unavailable.
         if not torch.cuda.is_available():
             raise RuntimeError("CUDA is not available. This model requires GPU.")
         if not getattr(self.config, "use_gpu", False):
             raise RuntimeError("This model requires GPU. Please run with --use_gpu True.")
-        self.device = torch.device("cuda:{}".format(self.config.gpu))
+        self.device = None
         # 是否启用记忆门控融合
         self.use_mem_gate = config.use_mem_gate
         
@@ -92,11 +93,21 @@ class Model(nn.Module):
 
         # 构建各子模块
         self._init_modules(config)
-        # VLM 具体模型实例
-        self.vlm_model = self.vlm_manager.model
+        # VLM 具体模型实例由 VLMManager 管理
+
+    def _infer_device(self):
+        try:
+            return next(self.patch_embedding.parameters()).device
+        except StopIteration:
+            return torch.device("cpu")
+
+    def _infer_dtype(self):
+        try:
+            return next(self.multimodal_enhancement.parameters()).dtype
+        except StopIteration:
+            return torch.float32
 
     def _init_modules(self, config):
-        # 将时间序列切分为 patch 并做嵌入
         self.patch_embedding = PatchEmbedding(
             config.d_model, 
             config.patch_len, 
@@ -104,9 +115,7 @@ class Model(nn.Module):
             config.padding, 
             config.dropout
         )
-        # 计算 flatten 后的特征维度：n_patches * d_model
         self.head_nf = config.d_model * int((config.seq_len - config.patch_len) / config.stride + 2)
-        # 将 [n_patches, d_model] 拉平成向量
         self.flatten = nn.Flatten(start_dim=-2)
         
         # Main memory prediction head
@@ -121,7 +130,6 @@ class Model(nn.Module):
             nn.Dropout(config.dropout)
         )
         
-        # 多模态预测头：对融合后的 d_model 做 pred_len 映射
         self.multimodal_head = nn.Sequential(
             nn.Linear(config.d_model, config.pred_len),
             nn.LayerNorm(config.pred_len),
@@ -129,9 +137,9 @@ class Model(nn.Module):
             nn.Dropout(config.dropout)
         )
         
-        # Vision enhancement
+        # Multimodal enhancement
         self.multimodal_enhancement = nn.Sequential(
-            nn.Linear(self.vlm_manager.hidden_size, config.d_model),
+            nn.Linear(self.vlm_manager.hidden_size * 2, config.d_model),  # Combine vision and text
             nn.GELU(),
             nn.Dropout(config.dropout)
         )
@@ -146,7 +154,6 @@ class Model(nn.Module):
         
         # Memory fusion gate
         if self.use_mem_gate:
-            # 记忆门控：根据局部/全局记忆自适应加权
             self.memory_fusion_gate = nn.Sequential(
                 nn.Linear(config.d_model * 2, config.d_model),
                 nn.GELU(),
@@ -154,15 +161,28 @@ class Model(nn.Module):
                 nn.Softmax(dim=-1)
             )
 
+        # Prediction fusion gate
+        self.gate = nn.Sequential(
+            nn.Linear(config.pred_len * 2, config.pred_len),
+            nn.GELU(),
+            nn.Linear(config.pred_len, 2),
+            nn.Softmax(dim=-1)
+        )
+        
+        # Final fusion layer
+        self.fusion_layer = nn.Sequential(
+            nn.Linear(config.pred_len * 2, config.pred_len),
+            nn.GELU(),
+            nn.Dropout(config.dropout)
+        )
+        
         # Memory-related modules
-        # 局部记忆 MLP：对检索到的 patch 进行非线性变换
         self.local_memory_mlp = nn.Sequential(
             nn.Linear(config.d_model, config.d_model * 2),
             nn.GELU(),
             nn.Linear(config.d_model * 2, config.d_model)
         )
         
-        # 全局记忆注意力：捕获 patch 间依赖关系
         self.memory_attention = nn.MultiheadAttention(
             embed_dim=config.d_model,
             num_heads=4,
@@ -170,8 +190,6 @@ class Model(nn.Module):
             batch_first=True
         )
         
-        # 学习式图像生成模块（可将时间序列转为图像特征）
-        #这个是转化为图像的重点
         self.learnable_image_module = LearnableTimeSeriesToImage(
             input_dim=3, 
             hidden_dim=48, 
@@ -180,24 +198,35 @@ class Model(nn.Module):
             periodicity=config.periodicity
         )
         
-        # 可学习的门控标量
         self.alpha = nn.Parameter(torch.tensor(0.5))  # Learnable gating parameter
-        # LayerNorm 统一特征尺度
         self.layer_norm = nn.LayerNorm(config.d_model)
 
-    def forward_prediction(self, vision_embeddings, n_vars):
-        # 仅使用视觉嵌入进行预测
-        multimodal_features = self.multimodal_enhancement(vision_embeddings)  # [B, d_model]
+    def forward_prediction(self, x_enc, vision_embeddings, text_embeddings):
+        # 兼容旧调用：x_enc 可能传入但不使用
+        B = vision_embeddings.shape[0]
+        n_vars = x_enc.shape[2] if x_enc is not None else self.config.enc_in
+
+        # 仅图文特征
+        multimodal_features = torch.cat([vision_embeddings, text_embeddings], dim=-1)  # [B, hidden*2]
+        multimodal_features = self.multimodal_enhancement(multimodal_features)  # [B, d_model]
         multimodal_features = multimodal_features.unsqueeze(1).expand(-1, n_vars, -1)  # [B, n_vars, d_model]
-        multimodal_features = self.layer_norm(multimodal_features)  # [B, n_vars, d_model]
-        predictions = self.multimodal_head(multimodal_features)  # [B, n_vars, pred_len]
-        return predictions.permute(0, 2, 1)  # [B, pred_len, n_vars]
+        multimodal_features = self.layer_norm(multimodal_features)
+
+        # 用自身做注意力（等价于图文自注意力），不再依赖时间特征
+        q = multimodal_features / torch.norm(multimodal_features, dim=-1, keepdim=True)
+        multimodal_features, _ = self.cross_attention(query=q, key=q, value=multimodal_features)
+
+        multimodal_features = self.layer_norm(multimodal_features)
+        multimodal_features = self.multimodal_head(multimodal_features)  # [B, n_vars, pred_len]
+        return multimodal_features.permute(0, 2, 1)  # [B, pred_len, n_vars]
+
 
     def forward(self, x_enc, x_mark_enc=None, x_dec=None, x_mark_dec=None, mask=None):
         B, L, D = x_enc.shape
-        # 确保输入在指定设备上
-        x_enc = x_enc.to(self.device)
-        
+        # 确保输入在模型所在设备上
+        target_device = self._infer_device()
+        if x_enc.device != target_device:
+            x_enc = x_enc.to(target_device)
         # Normalize input
         # 标准化时间序列，记录均值与方差用于反归一化
         x_enc, means, stdev = self._normalize_input(x_enc)
@@ -208,11 +237,15 @@ class Model(nn.Module):
         
         # Process images with the VLM
         # 仅提取视觉嵌入
-        vision_embeddings = self.vlm_manager.process_images(images)
+        prompts="请你预测接下来的时间序列数据走向"
+        vision_embeddings, text_embeddings = self.vlm_manager.process_inputs(B, images, prompts)
+        model_dtype = self._infer_dtype()
+        if vision_embeddings.device != target_device or vision_embeddings.dtype != model_dtype:
+            vision_embeddings = vision_embeddings.to(device=target_device, dtype=model_dtype)
         
         # Main prediction branch
         # 进入主预测分支
-        predictions = self.forward_prediction(vision_embeddings, D)
+        predictions = self.forward_prediction(x_enc,vision_embeddings,text_embeddings)
         
         # Denormalize output
         # 将预测结果反归一化回原始尺度
@@ -241,7 +274,7 @@ class Model(nn.Module):
         """
         # 根据配置选择可学习图像模块或固定的时间序列转图像方法.
         #z
-        if self.config.learnable_image:
+        if self.config.learnable_image:    #这里记得修改成需要学习的
             images = self.learnable_image_module(x_enc)
         else:            
             images = time_series_to_simple_image(x_enc, image_size, context_len, periodicity)
@@ -330,3 +363,4 @@ class Model(nn.Module):
             except Exception as e:
                 print(f"Error saving image {i}: {e}")
                 continue
+

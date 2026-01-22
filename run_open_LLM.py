@@ -1,16 +1,18 @@
 import os
 import time
 import argparse
+import torch
 from utils import error
 from utils.llm_aft_trainer import LLM_Inference
 from utils.config import *
-from utils.utils import merge
+from utils.utils import merge, location_direction_dict
+from src.TimeVLM.ts_image_adapter import TimeSeriesImageAdapter
 
 def parse_args():
     parser = argparse.ArgumentParser()
     parser.add_argument("--memo", type=str, default='LLMTLCSRun')
-    parser.add_argument("--llm_model", type=str, default="llama_cgpr_13b_jinan_1")
-    parser.add_argument("--llm_path", type=str, default="./ft_models/merged/llama_cgpr_13b_jinan_1")
+    parser.add_argument("--llm_model", type=str, default="gemma-3-27B")
+    parser.add_argument("--llm_path", type=str, default="/home/data/model/gemma-3-27B/")
     parser.add_argument("--num_rounds", type=int, default=1)
     parser.add_argument("--new_max_tokens", type=int, default=1024)
     parser.add_argument("--proj_name", type=str, default="LLM-TSCS-extreme")
@@ -21,6 +23,18 @@ def parse_args():
     parser.add_argument("--traffic_file", type=str, default="flow_main_stream.json")
 
     return parser.parse_args()
+
+def _resolve_ts_adapter_device():
+    if not torch.cuda.is_available():
+        return None
+    local_rank = os.environ.get("LOCAL_RANK")
+    if local_rank is not None:
+        try:
+            local_rank = int(local_rank)
+        except ValueError:
+            local_rank = 0
+        return f"cuda:{local_rank}"
+    return "cuda:0"
 
 
 def main(in_args):
@@ -124,10 +138,15 @@ def main(in_args):
         "PATH_TO_DATA": os.path.join("data", template, str(road_net))
     }
 
+    ts_adapter = TimeSeriesImageAdapter(
+        input_dim=len(location_direction_dict),
+        device=_resolve_ts_adapter_device(),
+    )
     trainer = LLM_Inference(dic_agent_conf_extra,
                             merge(dic_traffic_env_conf, dic_traffic_env_conf_extra),
                             dic_path_extra,
-                            f'{template}-{road_net}', in_args.traffic_file.split(".")[0])
+                            f'{template}-{road_net}', in_args.traffic_file.split(".")[0],
+                            ts_image_adapter=ts_adapter)
 
     trainer.train_test()
 

@@ -3,8 +3,15 @@ from typing import Optional, Dict, Sequence
 import torch
 import transformers
 from torch.utils.data import Dataset
+import os
+os.environ["TRANSFORMERS_NO_TF"] = "1"
+os.environ["TRANSFORMERS_NO_FLAX"] = "1"  # 可选
+
 from transformers import Seq2SeqTrainer
 import torch.nn.functional as F
+import os
+os.environ["TRANSFORMERS_NO_TF"] = "1"
+os.environ["TRANSFORMERS_NO_FLAX"] = "1"  # 可选
 
 IGNORE_INDEX = -100
 DEFAULT_PAD_TOKEN = "[PAD]"

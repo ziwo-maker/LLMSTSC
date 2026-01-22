@@ -1,14 +1,11 @@
-import os
 import sys
 import torch
 import torch.nn as nn
 from transformers import CLIPProcessor, CLIPModel
 from transformers import Blip2Processor, Blip2Model
 
-# Ensure project root is on sys.path when running this file directly.
-PROJECT_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", ".."))
-if PROJECT_ROOT not in sys.path:
-    sys.path.insert(0, PROJECT_ROOT)
+# Import custom modules, assuming they are stored in the parent directory
+sys.path.append("../")
 from src.TimeVLM.vlm_custom import CustomVLM
 from layers.models_mae import *
 from transformers.models.vilt import *
@@ -145,40 +142,12 @@ class VLMManager:
             print(f"Prompts: {prompts}")
             raise e
 
-    def process_images(self, images):
-        try:
-            if self.vlm_type == "clip":
-                return self._process_clip_images(images)
-            elif self.vlm_type == "blip2":
-                return self._process_blip2_images(images)
-            elif self.vlm_type == "vilt":
-                return self._process_vilt_images(images)
-            elif self.vlm_type == "custom":
-                return self._process_custom_images(images)
-        except Exception as e:
-            print(f"Error processing images: {e}")
-            print(f"Images shape: {images.shape}")
-            raise e
-
-    @staticmethod
-    def _get_batch_size(images):
-        if torch.is_tensor(images):
-            return images.size(0)
-        return len(images)
-
     def _process_clip_inputs(self, B, images, prompts):
         encoding = self.processor(images=images, text=prompts, return_tensors="pt").to(self.device)
         outputs = self.model(**encoding, output_hidden_states=True)
         text_features = outputs.text_embeds  # Shape: [B, hidden_size]
         image_features = outputs.image_embeds  # Shape: [B, hidden_size]
         return image_features, text_features  # Both shape: [B, hidden_size]
-
-    def _process_clip_images(self, images):
-        encoding = self.processor(images=images, return_tensors="pt").to(self.device)
-        image_features = self.model.get_image_features(
-            pixel_values=encoding["pixel_values"]
-        )
-        return image_features  # Shape: [B, hidden_size]
 
     def _process_blip2_inputs(self, B, images, prompts):
         encoding = self.processor(images=images, text=prompts, return_tensors="pt", padding=True).to(self.device)
@@ -194,12 +163,6 @@ class VLMManager:
         image_features = image_features.mean(dim=1)  # [B, hidden_size]
         
         return image_features, text_features  # Both shape: [B, hidden_size]
-
-    def _process_blip2_images(self, images):
-        batch_size = self._get_batch_size(images)
-        dummy_prompts = [""] * batch_size
-        image_features, _ = self._process_blip2_inputs(batch_size, images, dummy_prompts)
-        return image_features  # Shape: [B, hidden_size]
     
     def _process_vilt_inputs(self, B, images, prompts):
         encoding = self.processor(images=images, text=prompts, return_tensors="pt", padding=True).to(self.device)
@@ -216,17 +179,8 @@ class VLMManager:
         image_features = image_features.mean(dim=1)  # [B, hidden_size]
         
         return image_features, text_features  # Both shape: [B, hidden_size]
-
-    def _process_vilt_images(self, images):
-        batch_size = self._get_batch_size(images)
-        dummy_prompts = [""] * batch_size
-        image_features, _ = self._process_vilt_inputs(batch_size, images, dummy_prompts)
-        return image_features  # Shape: [B, hidden_size]
     
     def _process_custom_inputs(self, B, images, prompts):
         vision_embeddings = self.model.get_vision_embeddings(images)    # Shape: [B, hidden_size]
         text_embeddings = self.model.get_text_embeddings(prompts)        # Shape: [B, hidden_size]
         return vision_embeddings, text_embeddings  # Both shape: [B, hidden_size]
-
-    def _process_custom_images(self, images):
-        return self.model.get_vision_embeddings(images)  # Shape: [B, hidden_size]

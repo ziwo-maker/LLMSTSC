@@ -299,7 +299,19 @@ def parse_args():
     parser.add_argument("--finetune_vlm", type=_str2bool, default=False)
     parser.add_argument("--batch_size", type=int, default=64)
     parser.add_argument("--learning_rate", type=float, default=0.0005)
-    parser.add_argument("--vlm_type", type=str, default="clip")
+
+    parser.add_argument(
+        "--vlm_device_map",
+        type=str,
+        default="",
+        help="Transformers device_map for VLM (e.g., auto). Empty disables sharding.",
+    )
+    parser.add_argument(
+        "--vlm_max_memory",
+        type=str,
+        default="",
+        help="Max memory for VLM sharding (e.g., '0:20GiB,1:20GiB,cpu:32GiB' or '20GiB').",
+    )
     parser.add_argument("--use_mem_gate", type=_str2bool, default=False)
     parser.add_argument("--dropout", type=float, default=0.05)
     parser.add_argument("--percent", type=float, default=0.1)
@@ -323,9 +335,9 @@ def parse_args():
     parser.add_argument('--embed', type=str, default='timeF', help='time features encoding, options:[timeF, fixed, learned]')  # 时间特征编码方式
     parser.add_argument('--freq', type=str, default='h', help='freq for time features encoding, options:[s:secondly, t:minutely, h:hourly, d:daily, b:business days, w:weekly, m:monthly], you can also use more detailed freq like 15min or 3h')  # 时间特征频率
 
-    parser.add_argument('--target_data', type=str, default='ETTh2', help='target dataset type')  # 目标数据集类型
-    parser.add_argument('--target_root_path', type=str, default='./data/ETT/', help='root path of the target data file')  # 目标数据根目录
-    parser.add_argument('--target_data_path', type=str, default='ETTh2.csv', help='target data file')  # 目标数据文件
+    # parser.add_argument('--target_data', type=str, default='ETTh2', help='target dataset type')  # 目标数据集类型
+    # parser.add_argument('--target_root_path', type=str, default='./data/ETT/', help='root path of the target data file')  # 目标数据根目录
+    # parser.add_argument('--target_data_path', type=str, default='ETTh2.csv', help='target data file')  # 目标数据文件
 
     parser.add_argument('--seasonal_patterns', type=str, default='Monthly', help='subset for M4')  # M4子集
 
@@ -362,15 +374,12 @@ def parse_args():
     
     parser.add_argument('--num_workers', type=int, default=10, help='data loader num workers')  # DataLoader进程数
     
-    
-    
-    
     parser.add_argument('--loss', type=str, default='MSE', help='loss function')  # 损失函数
     parser.add_argument('--lradj', type=str, default='type1', help='adjust learning rate')  # 学习率调整策略
-
+    parser.add_argument('--vlm_type', type=str, default='CLIP', help='VLM model type, e.g. CLIP, BLIP2, etc.')
     
     return parser.parse_args()
-D
+
 def main():
     args = parse_args()
     if args.csv_path == "":

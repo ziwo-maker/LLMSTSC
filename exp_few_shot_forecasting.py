@@ -24,8 +24,14 @@ class Exp_Few_Shot_Forecast(Exp_Basic):
         model = self.model_dict[self.args.model].Model(self.args).float()
 
         if self.args.use_multi_gpu and self.args.use_gpu:
-            # 多卡训练：使用 DataParallel 包装
-            model = nn.DataParallel(model, device_ids=self.args.device_ids)
+            device_map = getattr(self.args, "vlm_device_map", None)
+            if isinstance(device_map, str) and device_map.strip().lower() in ("", "none", "null"):
+                device_map = None
+            if device_map is not None:
+                print("VLM device_map is enabled; skipping DataParallel to avoid double sharding.")
+            else:
+                # 多卡训练：使用 DataParallel 包装
+                model = nn.DataParallel(model, device_ids=self.args.device_ids)
         return model
 
     def _get_data(self, flag):

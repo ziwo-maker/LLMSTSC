@@ -1,36 +1,65 @@
-from models.random_agent import RandomAgent
-from models.fixedtime_agent import FixedtimeAgent
-from models.maxpressure_agent import MaxPressureAgent
-from models.efficient_maxpressure_agent import EfficientMaxPressureAgent
-from models.mplight_agent import MPLightAgent
-from models.colight_agent import CoLightAgent
-from models.presslight_one import PressLightAgentOne
-from models.advanced_mplight_agent import AdvancedMPLightAgent
-from models.advanced_maxpressure_agent import AdvancedMaxPressureAgent
-from models.simple_dqn_one import SimpleDQNAgentOne
-from models.attendlight_agent import AttendLightAgent
-from models.chatgpt import (ChatGPTTLCS_Wait_Time_Forecast, ChatGPTTLCS_Commonsense)
+import importlib
 
-DIC_AGENTS = {
-    "Random": RandomAgent,
-    "Fixedtime": FixedtimeAgent,
-    "MaxPressure": MaxPressureAgent,
-    "EfficientMaxPressure": EfficientMaxPressureAgent,
-    "AdvancedMaxPressure": AdvancedMaxPressureAgent,
 
-    "EfficientPressLight": PressLightAgentOne,
-    "EfficientColight": CoLightAgent,
-    "EfficientMPLight": MPLightAgent,
-    "MPLight": MPLightAgent,
-    "Colight": CoLightAgent,
+class _LazyAgentDict:
+    def __init__(self, mapping):
+        self._mapping = dict(mapping)
+        self._cache = {}
 
-    "AdvancedMPLight": AdvancedMPLightAgent,
-    "AdvancedColight": CoLightAgent,
-    "AdvancedDQN": SimpleDQNAgentOne,
-    "Attend": AttendLightAgent,
-    "ChatGPTTLCSWaitTimeForecast": ChatGPTTLCS_Wait_Time_Forecast,
-    "ChatGPTTLCSCommonsense": ChatGPTTLCS_Commonsense
+    def __getitem__(self, key):
+        if key in self._cache:
+            return self._cache[key]
+        if key not in self._mapping:
+            raise KeyError(key)
+        module_name, class_name = self._mapping[key]
+        try:
+            module = importlib.import_module(module_name)
+            cls = getattr(module, class_name)
+        except Exception as exc:
+            raise ImportError(
+                f"Failed to import agent '{key}' from {module_name}.{class_name}: {exc}"
+            ) from exc
+        self._cache[key] = cls
+        return cls
+
+    def __contains__(self, key):
+        return key in self._mapping
+
+    def __iter__(self):
+        return iter(self._mapping)
+
+    def __len__(self):
+        return len(self._mapping)
+
+    def keys(self):
+        return self._mapping.keys()
+
+    def items(self):
+        return ((key, self[key]) for key in self._mapping)
+
+    def values(self):
+        return (self[key] for key in self._mapping)
+
+_AGENT_CLASS_PATHS = {
+    "Random": ("models.random_agent", "RandomAgent"),
+    "Fixedtime": ("models.fixedtime_agent", "FixedtimeAgent"),
+    "MaxPressure": ("models.maxpressure_agent", "MaxPressureAgent"),
+    "EfficientMaxPressure": ("models.efficient_maxpressure_agent", "EfficientMaxPressureAgent"),
+    "AdvancedMaxPressure": ("models.advanced_maxpressure_agent", "AdvancedMaxPressureAgent"),
+    "EfficientPressLight": ("models.presslight_one", "PressLightAgentOne"),
+    "EfficientColight": ("models.colight_agent", "CoLightAgent"),
+    "EfficientMPLight": ("models.mplight_agent", "MPLightAgent"),
+    "MPLight": ("models.mplight_agent", "MPLightAgent"),
+    "Colight": ("models.colight_agent", "CoLightAgent"),
+    "AdvancedMPLight": ("models.advanced_mplight_agent", "AdvancedMPLightAgent"),
+    "AdvancedColight": ("models.colight_agent", "CoLightAgent"),
+    "AdvancedDQN": ("models.simple_dqn_one", "SimpleDQNAgentOne"),
+    "Attend": ("models.attendlight_agent", "AttendLightAgent"),
+    "ChatGPTTLCSWaitTimeForecast": ("models.chatgpt", "ChatGPTTLCS_Wait_Time_Forecast"),
+    "ChatGPTTLCSCommonsense": ("models.chatgpt", "ChatGPTTLCS_Commonsense"),
 }
+
+DIC_AGENTS = _LazyAgentDict(_AGENT_CLASS_PATHS)
 
 DIC_PATH = {
     "PATH_TO_MODEL": "model/default",
