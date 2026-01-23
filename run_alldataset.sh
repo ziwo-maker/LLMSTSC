@@ -8,7 +8,7 @@ export CUDA_VISIBLE_DEVICES=0,1,2
 cd /home/code/LLMTSCS/
 
 
-CUDA_VISIBLE_DEVICES=0,1,2,3 python run_open_LLM_with_vllm.py     --llm_model gemma-3-27B     --llm_path /home/data/model/gemma-3-27B/     --dataset jinan     --traffic_file anon_3_4_jinan_synthetic_24h_6000.json
+CUDA_VISIBLE_DEVICES=0,1,2,3 python run_open_LLM_with_vllm.py     --llm_model gemma-3-27B     --llm_path /home/data/model/gemma-3-27B/     --dataset jinan     --traffic_file anon_3_4_jinan_real.json
 
 CUDA_VISIBLE_DEVICES=0,1,2,3 python run_open_LLM_with_vllm.py     --llm_model gemma-3-27B     --llm_path /home/data/model/gemma-3-27B/     --dataset newyork_28x7     --traffic_file anon_28_7_newyork_real_triple.json
 

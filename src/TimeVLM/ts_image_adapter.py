@@ -12,20 +12,22 @@ class TimeSeriesImageAdapter:
     """
     Convert time series inputs into image tensors with the same preprocessing
     logic as Model.vision_augmented_learner.
+    中文：将时间序列输入转换为图像张量，复用与 Model.vision_augmented_learner 相同的预处理逻辑。
     """
     def __init__(
         self,
         image_size: int = 56,
         seq_len: Optional[int] = 25,
-        periodicity: int = 24,
+        periodicity: int = 25,
         norm_const: float = 0.4,
-        learnable_image: bool = False,
+        learnable_image: bool = True,
         three_channel_image: bool = True,
         save_images: bool = False,
         device: Optional[torch.device] = None,
         input_dim: int = 3,
         hidden_dim: int = 48,
     ) -> None:
+        """中文：初始化图像转换的配置与（可选）可学习图像模块。"""
         self.image_size = int(image_size)
         self.seq_len = int(seq_len) if seq_len is not None else None
         self.periodicity = int(periodicity)
@@ -51,9 +53,11 @@ class TimeSeriesImageAdapter:
                 self.learnable_image_module = self.learnable_image_module.to(self.device)
 
     def __call__(self, data: Any) -> torch.Tensor:
+        """中文：使实例可直接被调用，等价于调用 generate。"""
         return self.generate(data)
 
     def _ensure_tensor(self, data: Any) -> torch.Tensor:
+        """中文：将输入转换为形状为 (B, L, C) 的 float32 张量并对齐设备。"""
         if torch.is_tensor(data):
             x_enc = data
         else:
@@ -73,6 +77,7 @@ class TimeSeriesImageAdapter:
         return x_enc
 
     def _align_device(self, x_enc: torch.Tensor) -> torch.Tensor:
+        """中文：若使用可学习模块，将输入移动到该模块所在设备。"""
         if self.learnable_image_module is None:
             return x_enc
         module_device = next(self.learnable_image_module.parameters()).device
@@ -81,6 +86,7 @@ class TimeSeriesImageAdapter:
         return x_enc
 
     def _context_len(self, x_enc: torch.Tensor) -> int:
+        """中文：根据配置与输入长度确定上下文长度。"""
         if self.seq_len is None or self.seq_len <= 0:
             return x_enc.shape[1]
         if x_enc.shape[1] != self.seq_len:
@@ -88,6 +94,7 @@ class TimeSeriesImageAdapter:
         return self.seq_len
 
     def _normalize_input(self, x_enc: torch.Tensor):
+        """中文：按序列维度做去均值与标准化，返回归一化张量及均值/方差。"""
         means = x_enc.mean(1, keepdim=True).detach()
         x_enc = x_enc - means
         stdev = torch.sqrt(torch.var(x_enc, dim=1, keepdim=True, unbiased=False) + 1e-5)
@@ -97,6 +104,7 @@ class TimeSeriesImageAdapter:
 
     @staticmethod
     def _normalize_images(images: torch.Tensor) -> torch.Tensor:
+        """中文：把图像张量线性缩放到 [0, 255] 并转为 uint8。"""
         min_vals = images.reshape(images.size(0), -1).min(dim=1, keepdim=True)[0].view(-1, 1, 1, 1)
         max_vals = images.reshape(images.size(0), -1).max(dim=1, keepdim=True)[0].view(-1, 1, 1, 1)
         epsilon = 1e-5
@@ -112,6 +120,7 @@ class TimeSeriesImageAdapter:
         context_len: int,
         periodicity: int,
     ) -> torch.Tensor:
+        """中文：将时序特征映射为图像并归一化，必要时保存到磁盘。"""
         if self.learnable_image:
             if self.learnable_image_module is None:
                 out_channels = 3 if self.three_channel_image else 1
@@ -134,6 +143,7 @@ class TimeSeriesImageAdapter:
         return images
 
     def generate(self, data: Any) -> torch.Tensor:
+        """中文：执行完整流程（含输入归一化）并生成图像张量。"""
         x_enc = self._ensure_tensor(data)
         x_enc = self._align_device(x_enc)
         x_enc, _, _ = self._normalize_input(x_enc)
@@ -141,12 +151,14 @@ class TimeSeriesImageAdapter:
         return self.vision_augmented_learner(x_enc, self.image_size, context_len, self.periodicity)
 
     def generate_from_normalized(self, data: Any) -> torch.Tensor:
+        """中文：假设输入已归一化，直接生成图像张量。"""
         x_enc = self._ensure_tensor(data)
         x_enc = self._align_device(x_enc)
         context_len = self._context_len(x_enc)
         return self.vision_augmented_learner(x_enc, self.image_size, context_len, self.periodicity)
 
     def generate_images(self, data: Any, normalized: bool = False, return_tensor: bool = False):
+        """中文：生成图像（可选已归一化输入）并选择返回张量或 PIL 图片。"""
         if normalized:
             images = self.generate_from_normalized(data)
         else:
@@ -156,6 +168,7 @@ class TimeSeriesImageAdapter:
         return self.to_pil(images)
 
     def to_pil(self, images: torch.Tensor):
+        """中文：将图像张量批量转换为 PIL.Image 列表。"""
         if not torch.is_tensor(images):
             return None
         images = images.detach().cpu()
@@ -171,6 +184,7 @@ class TimeSeriesImageAdapter:
         return pil_images
 
     def save_images_to_disk(self, images: torch.Tensor) -> None:
+        """中文：将图像张量批量保存为 PNG 到固定目录。"""
         save_dir = "ts-images/timevlm"
         os.makedirs(save_dir, exist_ok=True)
 

@@ -1,10 +1,12 @@
 import os
 import time
 import argparse
+import torch
 from utils import error
 from utils.llm_aft_trainer import LLM_Inference_VLLM
 from utils.config import *
-from utils.utils import merge
+from utils.utils import merge, location_direction_dict
+from src.TimeVLM.ts_image_adapter import TimeSeriesImageAdapter
 
 
 def parse_args():
@@ -29,6 +31,18 @@ def parse_args():
     parser.add_argument("--ts_image_timeout", type=float, default=5.0)
 
     return parser.parse_args()
+
+def _resolve_ts_adapter_device():
+    if not torch.cuda.is_available():
+        return None
+    local_rank = os.environ.get("LOCAL_RANK")
+    if local_rank is not None:
+        try:
+            local_rank = int(local_rank)
+        except ValueError:
+            local_rank = 0
+        return f"cuda:{local_rank}"
+    return "cuda:0"
 
 
 def main(in_args):
@@ -146,14 +160,28 @@ def main(in_args):
         "PATH_TO_DATA": os.path.join("data", template, str(road_net))
     }
 
+    ts_adapter = TimeSeriesImageAdapter(
+        input_dim=len(location_direction_dict),
+        seq_len=in_args.ts_image_seq_len,
+        device=_resolve_ts_adapter_device(),
+    )
     trainer = LLM_Inference_VLLM(dic_agent_conf_extra,
                                  merge(dic_traffic_env_conf, dic_traffic_env_conf_extra),
                                  dic_path_extra,
-                                 f'{template}-{road_net}', in_args.traffic_file.split(".")[0])
+                                 f'{template}-{road_net}', in_args.traffic_file.split(".")[0],
+                                 ts_image_adapter=ts_adapter)
 
     trainer.train_test()
 
 
 if __name__ == "__main__":
+    # Ensure vLLM uses spawn to avoid CUDA re-init in forked subprocesses.
+    os.environ.setdefault("VLLM_WORKER_MULTIPROC_METHOD", "spawn")
+    try:
+        import multiprocessing as mp
+        mp.set_start_method("spawn", force=True)
+    except RuntimeError:
+        # Start method already set by parent process/debugger.
+        pass
     args = parse_args()
     main(args)

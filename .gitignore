@@ -1,4 +1,6 @@
 records/**/*replayLogFile.txt
+records/
+results/
 *.log
 .env
 *.local
