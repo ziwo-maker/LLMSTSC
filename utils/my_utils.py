@@ -548,7 +548,26 @@ def getPrompt(state_txt):
 
     prompt = [
         {"role": "system",
-         "content": "You are an expert in traffic management. You can use your knowledge of traffic commonsense to solve this traffic signal control tasks."},
+         "content": '''You are an expert in traffic management. You can use your knowledge of traffic commonsense to solve this traffic signal control tasks.IMPORTANT:
+        - The attached image is the ONLY reliable observation of the intersection state for the last 30 seconds.
+        - Do NOT assume the traffic numbers in text are correct. If any text conflicts with the image, trust the image.
+        - You MUST look at and use the image to make the decision.
+
+        ### What the image encodes (read carefully)
+        The image encodes a 30-second time series sampled every 2 seconds (15 time steps) for 8 lanes at one intersection.
+        - X-axis: time from oldest (left) to most recent (right).
+        - Y-axis: lanes in this fixed order:
+        1) East Through (ET)
+        2) West Through (WT)
+        3) North Through (NT)
+        4) South Through (ST)
+        5) East Left (EL)
+        6) West Left (WL)
+        7) North Left (NL)
+        8) South Left (SL)
+        - Pixel intensity (or color strength): larger means more vehicles in that lane at that time.
+        Interpret the rightmost columns as the latest demand. Consider both the current magnitude and recent trend (growing vs shrinking).
+        '''},
         {"role": "user",
          "content": "A traffic light regulates a four-section intersection with northern, southern, eastern, and western "
                     "sections, each containing two lanes: one for through traffic and one for left-turns. Each lane is "

@@ -1,6 +1,9 @@
 records/**/*replayLogFile.txt
 records/
 results/
+data/
+wandb/*
+checkpoints/*
 *.log
 .env
 *.local

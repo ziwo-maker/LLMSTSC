@@ -926,7 +926,30 @@ class LLM_Inference:
         self._traffic_history_output_path = None
         self._traffic_history_last_written_bin = -1
         self._traffic_history_base_dt = None
-     
+
+        try:
+            self.traffic_series_interval_s = int(self.dic_agent_conf.get("TRAFFIC_SERIES_INTERVAL", 2) or 2)
+        except (TypeError, ValueError):
+            self.traffic_series_interval_s = 2
+        try:
+            self.traffic_series_window_s = int(self.dic_agent_conf.get("TRAFFIC_SERIES_WINDOW", 30) or 30)
+        except (TypeError, ValueError):
+            self.traffic_series_window_s = 30
+        self.traffic_series_output_dir = str(
+            self.dic_agent_conf.get("TRAFFIC_SERIES_OUTPUT_DIR", "")
+        ).strip()
+        if not self.traffic_series_output_dir:
+            self.traffic_series_output_dir = os.path.join("data", "recorded")
+        self.traffic_series_basename = str(
+            self.dic_agent_conf.get("TRAFFIC_SERIES_BASENAME", "traffic_prompt_series")
+        ).strip() or "traffic_prompt_series"
+        self._traffic_series_output_path = None
+        self._traffic_series_initialized = False
+        self._traffic_series_intersection_index = None
+        self._traffic_series_movement_keys = None
+        self._traffic_series_last_written_bin = -1
+        self._traffic_series_base_dt = None
+
         if not os.path.exists("./fails"):
             os.mkdir("./fails")
         self.fail_log_file = f"./fails/{self.dic_agent_conf['LLM_MODEL']}-{self.dic_traffic_env_conf['TRAFFIC_FILE']}-{self.dic_traffic_env_conf['ROADNET_FILE']}.json"
@@ -934,6 +957,7 @@ class LLM_Inference:
         self._init_ts_image_client()
         if self.ts_image_adapter is None:
             self._init_ts_image_adapter()
+        self._ensure_traffic_series_config()
         self.initialize()
 
     def initialize_llm(self):
@@ -1031,6 +1055,136 @@ class LLM_Inference:
         if self.ts_history is not None and len(self.ts_history) == num_intersections:
             return
         self.ts_history = [deque(maxlen=self.ts_image_seq_len) for _ in range(num_intersections)]
+
+    def _traffic_series_run_tag(self):
+        run_dir = str(self.dic_path.get("PATH_TO_WORK_DIRECTORY", "")).strip()
+        run_tag = os.path.basename(run_dir) if run_dir else ""
+        if not run_tag:
+            run_tag = time.strftime("%m_%d_%H_%M_%S", time.localtime(time.time()))
+        return run_tag
+
+    def _ensure_traffic_series_config(self):
+        if self._traffic_series_initialized:
+            return
+        base_dir = self.traffic_series_output_dir or os.path.join("data", "recorded")
+        run_tag = self._traffic_series_run_tag()
+        output_dir = os.path.join(base_dir, run_tag)
+        os.makedirs(output_dir, exist_ok=True)
+        suffix = self._traffic_count_suffix(self.traffic_series_interval_s)
+        filename = f"{self.traffic_series_basename}_{suffix}.jsonl"
+        self._traffic_series_output_path = os.path.join(output_dir, filename)
+        with open(self._traffic_series_output_path, "w", encoding="utf-8"):
+            pass
+        self._traffic_series_initialized = True
+
+    def _resolve_series_movement_keys(self):
+        default_keys = ["NT", "NL", "ST", "SL", "ET", "EL", "WT", "WL"]
+        series_keys = list(self._traffic_series_movement_keys or [])
+        if not series_keys:
+            return default_keys, default_keys
+        output_keys = list(series_keys)
+        for key in default_keys:
+            if key not in output_keys:
+                output_keys.append(key)
+        return series_keys, output_keys
+
+    def _load_traffic_series(self):
+        if self._traffic_series_movement_keys is not None:
+            return
+        if self.env is None:
+            return
+        self._ensure_traffic_series_config()
+        interval = int(self.traffic_series_interval_s or 2)
+        if interval <= 0:
+            interval = 2
+
+        if not getattr(self.env, "traffic_count_enabled", False):
+            current_time = self.env.get_current_time()
+            if current_time in (None, 0, 0.0):
+                self.dic_traffic_env_conf["ENABLE_TRAFFIC_COUNT"] = True
+                self.dic_traffic_env_conf["TRAFFIC_COUNT_MODE"] = "intersection_movement"
+                self.dic_traffic_env_conf["TRAFFIC_COUNT_OUTPUT_FORMAT"] = "jsonl"
+
+        intervals = list(getattr(self.env, "traffic_count_intervals", []) or [])
+        if interval not in intervals:
+            intervals.append(interval)
+            self.dic_traffic_env_conf["TRAFFIC_COUNT_INTERVALS"] = sorted(set(intervals))
+            current_time = self.env.get_current_time()
+            if current_time in (None, 0, 0.0):
+                try:
+                    self.env._init_traffic_counter()
+                except Exception as exc:
+                    print(f"Traffic series counter init failed: {exc}")
+
+        self._traffic_series_intersection_index = {
+            inter_id: idx for idx, inter_id in enumerate(getattr(self.env, "traffic_intersection_ids", []) or [])
+        }
+        self._traffic_series_movement_keys = list(
+            getattr(self.env, "traffic_movement_keys", []) or ["NT", "NL", "ST", "SL", "ET", "EL", "WT", "WL"]
+        )
+        self._traffic_series_base_dt = getattr(self.env, "traffic_base_dt", None) or datetime(1970, 1, 1)
+
+    def _build_traffic_series_history(self, intersection_id, current_time_s):
+        self._load_traffic_series()
+        interval = int(self.traffic_series_interval_s or 2)
+        if interval <= 0:
+            interval = 2
+        series_keys, output_keys = self._resolve_series_movement_keys()
+        num_series_keys = len(series_keys)
+        counts = getattr(self.env, "traffic_counts_by_interval", {}).get(interval)
+        inter_idx = (self._traffic_series_intersection_index or {}).get(intersection_id)
+
+        current_bin = int(current_time_s) // interval
+        if counts is not None and counts.size > 0:
+            if current_bin >= counts.shape[0]:
+                current_bin = counts.shape[0] - 1
+        if current_bin < 0:
+            current_bin = 0
+
+        window_bins = int(self.traffic_series_window_s // interval) if interval > 0 else 0
+        start_bin = max(0, current_bin - window_bins)
+        base_dt = self._traffic_series_base_dt or datetime(1970, 1, 1)
+        history = []
+        for bin_idx in range(start_bin, current_bin + 1):
+            date_str = (base_dt + timedelta(seconds=bin_idx * interval)).strftime("%Y-%m-%d %H:%M:%S")
+            movement_counts = {key: 0 for key in output_keys}
+            if counts is not None and counts.size > 0 and inter_idx is not None and bin_idx >= 0:
+                if bin_idx < counts.shape[0]:
+                    offset = inter_idx * num_series_keys
+                    row = counts[bin_idx, offset : offset + num_series_keys]
+                    for mv_i, key in enumerate(series_keys):
+                        if mv_i < len(row):
+                            movement_counts[key] = int(row[mv_i])
+            history.append({"date": date_str, "movement_counts": movement_counts})
+        return history
+
+    def _record_traffic_prompt_series(self, current_time_s, prompts):
+        if not prompts:
+            return
+        self._load_traffic_series()
+        if not self._traffic_series_output_path:
+            return
+        interval = int(self.traffic_series_interval_s or 2)
+        if interval <= 0:
+            interval = 2
+        current_bin = int(current_time_s) // interval
+        if current_bin <= self._traffic_series_last_written_bin:
+            return
+        self._traffic_series_last_written_bin = current_bin
+
+        with open(self._traffic_series_output_path, "a", encoding="utf-8") as handle:
+            for idx, prompt in enumerate(prompts):
+                intersection_id = self.env.list_intersection[idx].inter_name
+                history = self._build_traffic_series_history(intersection_id, current_time_s)
+                for hist_idx, entry in enumerate(history):
+                    record = {
+                        "date": entry.get("date"),
+                        "interval_s": int(interval),
+                        "intersection_id": intersection_id,
+                        "movement_counts": entry.get("movement_counts", {}),
+                        "prompt": prompt if hist_idx == len(history) - 1 else "",
+                    }
+                    handle.write(json.dumps(record, ensure_ascii=False) + "\n")
 
     def _state_to_features(self, state):
         mode = self.ts_feature_mode
@@ -1325,48 +1479,48 @@ class LLM_Inference:
                 intersection_id = self.env.list_intersection[idx].inter_name
                 traffic_history = self._get_traffic_history_until(intersection_id, current_time)
 
-                # if not traffic_history:
-                #     raise ValueError(f"No traffic history for intersection {intersection_id} at t={current_time}.")
+                if not traffic_history:
+                    raise ValueError(f"No traffic history for intersection {intersection_id} at t={current_time}.")
 
-                # ts_seq = [[float(step.get(key, 0.0)) for key in movement_keys] for step in traffic_history]
+                ts_seq = [[float(step.get(key, 0.0)) for key in movement_keys] for step in traffic_history]
 
-                # try:
-                #     current_dim = len(ts_seq[0])
-                # except (TypeError, IndexError):
-                #     current_dim = self.ts_feature_dim or 3
+                try:
+                    current_dim = len(ts_seq[0])
+                except (TypeError, IndexError):
+                    current_dim = self.ts_feature_dim or 3
 
-                # if inferred_dim is None:
-                #     inferred_dim = current_dim
-                #     if self.ts_feature_dim is None:
-                #         self.ts_feature_dim = inferred_dim
+                if inferred_dim is None:
+                    inferred_dim = current_dim
+                    if self.ts_feature_dim is None:
+                        self.ts_feature_dim = inferred_dim
 
-                #     if getattr(ts_adapter, "learnable_image", False):
-                #         adapter_dim = getattr(ts_adapter, "input_dim", None)
-                #         if adapter_dim is not None and adapter_dim != inferred_dim:
-                #             raise ValueError(
-                #                 "TS image adapter input_dim mismatch; reinitialize in main with input_dim="
-                #                 f"{inferred_dim}."
-                #             )
+                    if getattr(ts_adapter, "learnable_image", False):
+                        adapter_dim = getattr(ts_adapter, "input_dim", None)
+                        if adapter_dim is not None and adapter_dim != inferred_dim:
+                            raise ValueError(
+                                "TS image adapter input_dim mismatch; reinitialize in main with input_dim="
+                                f"{inferred_dim}."
+                            )
 
-                # elif current_dim != inferred_dim:
-                #     raise ValueError(
-                #         f"Traffic history feature dim mismatch for {intersection_id}: "
-                #         f"expected {inferred_dim}, got {current_dim}."
-                #     )
+                elif current_dim != inferred_dim:
+                    raise ValueError(
+                        f"Traffic history feature dim mismatch for {intersection_id}: "
+                        f"expected {inferred_dim}, got {current_dim}."
+                    )
 
-                # ts_images_local = ts_adapter.generate_images(ts_seq)
-                # if not ts_images_local:
-                #     raise RuntimeError(f"TS image adapter returned no images for intersection {intersection_id}.")
+                ts_images_local = ts_adapter.generate_images(ts_seq)
+                if not ts_images_local:
+                    raise RuntimeError(f"TS image adapter returned no images for intersection {intersection_id}.")
 
-                # ts_image = ts_images_local[0]
-                # ts_images.append(ts_image)
+                ts_image = ts_images_local[0]
+                ts_images.append(ts_image)
 
                 prompt = getPrompt(state2text(s))
                 prompt = prompt[0]["content"] + "\n\n### Instruction:\n" + prompt[1]["content"] + "\n\n### Response:\n"
 
-
-
                 prompts.append(prompt)
+
+            self._record_traffic_prompt_series(current_time, prompts)
 
             if hasattr(self, "qwen") and self.qwen is not None and self.qwen is True:
                 inputs_text = [
@@ -1377,8 +1531,7 @@ class LLM_Inference:
                     )
                     for p in prompts
                 ]
-                # 第二步：调用 tokenizer/processor 时，显式指定 text 参数
-                # 关键修改：加上 text=... 并传入 ts_images 作为多模态输入
+
             else:
                 inputs_text = [
                     self.tokenizer.apply_chat_template(
@@ -1392,8 +1545,8 @@ class LLM_Inference:
 
             images_batched = [[img] for img in ts_images]
 
-            # inputs = self.processor(text=inputs_text, images=images_batched, padding=True, return_tensors="pt")
-            inputs = self.processor(text=inputs_text,  padding=True, return_tensors="pt")
+            inputs = self.processor(text=inputs_text, images=images_batched, padding=True, return_tensors="pt")
+
             responses = []
             previous_flag = 0
             for i in range(len(current_states)):
@@ -1608,6 +1761,29 @@ class LLM_Inference_VLLM:
         self._traffic_history_output_path = None
         self._traffic_history_last_written_bin = -1
         self._traffic_history_base_dt = None
+
+        try:
+            self.traffic_series_interval_s = int(self.dic_agent_conf.get("TRAFFIC_SERIES_INTERVAL", 2) or 2)
+        except (TypeError, ValueError):
+            self.traffic_series_interval_s = 2
+        try:
+            self.traffic_series_window_s = int(self.dic_agent_conf.get("TRAFFIC_SERIES_WINDOW", 30) or 30)
+        except (TypeError, ValueError):
+            self.traffic_series_window_s = 30
+        self.traffic_series_output_dir = str(
+            self.dic_agent_conf.get("TRAFFIC_SERIES_OUTPUT_DIR", "")
+        ).strip()
+        if not self.traffic_series_output_dir:
+            self.traffic_series_output_dir = os.path.join("data", "recorded")
+        self.traffic_series_basename = str(
+            self.dic_agent_conf.get("TRAFFIC_SERIES_BASENAME", "traffic_prompt_series")
+        ).strip() or "traffic_prompt_series"
+        self._traffic_series_output_path = None
+        self._traffic_series_initialized = False
+        self._traffic_series_intersection_index = None
+        self._traffic_series_movement_keys = None
+        self._traffic_series_last_written_bin = -1
+        self._traffic_series_base_dt = None
  
         if not os.path.exists("./fails"):
             os.mkdir("./fails")
@@ -1616,6 +1792,7 @@ class LLM_Inference_VLLM:
         
         if self.ts_image_adapter is None:
             self._init_ts_image_adapter()
+        self._ensure_traffic_series_config()
         self.initialize()
 
     def _infer_tensor_parallel_size(self):
@@ -1906,6 +2083,136 @@ class LLM_Inference_VLLM:
                     handle.write(json.dumps(record, ensure_ascii=False) + "\n")
         self._traffic_history_last_written_bin = current_bin
 
+    def _traffic_series_run_tag(self):
+        run_dir = str(self.dic_path.get("PATH_TO_WORK_DIRECTORY", "")).strip()
+        run_tag = os.path.basename(run_dir) if run_dir else ""
+        if not run_tag:
+            run_tag = time.strftime("%m_%d_%H_%M_%S", time.localtime(time.time()))
+        return run_tag
+
+    def _ensure_traffic_series_config(self):
+        if self._traffic_series_initialized:
+            return
+        base_dir = self.traffic_series_output_dir or os.path.join("data", "recorded")
+        run_tag = self._traffic_series_run_tag()
+        output_dir = os.path.join(base_dir, run_tag)
+        os.makedirs(output_dir, exist_ok=True)
+        suffix = self._traffic_count_suffix(self.traffic_series_interval_s)
+        filename = f"{self.traffic_series_basename}_{suffix}.jsonl"
+        self._traffic_series_output_path = os.path.join(output_dir, filename)
+        with open(self._traffic_series_output_path, "w", encoding="utf-8"):
+            pass
+        self._traffic_series_initialized = True
+
+    def _resolve_series_movement_keys(self):
+        default_keys = ["NT", "NL", "ST", "SL", "ET", "EL", "WT", "WL"]
+        series_keys = list(self._traffic_series_movement_keys or [])
+        if not series_keys:
+            return default_keys, default_keys
+        output_keys = list(series_keys)
+        for key in default_keys:
+            if key not in output_keys:
+                output_keys.append(key)
+        return series_keys, output_keys
+
+    def _load_traffic_series(self):
+        if self._traffic_series_movement_keys is not None:
+            return
+        if self.env is None:
+            return
+        self._ensure_traffic_series_config()
+        interval = int(self.traffic_series_interval_s or 2)
+        if interval <= 0:
+            interval = 2
+
+        if not getattr(self.env, "traffic_count_enabled", False):
+            current_time = self.env.get_current_time()
+            if current_time in (None, 0, 0.0):
+                self.dic_traffic_env_conf["ENABLE_TRAFFIC_COUNT"] = True
+                self.dic_traffic_env_conf["TRAFFIC_COUNT_MODE"] = "intersection_movement"
+                self.dic_traffic_env_conf["TRAFFIC_COUNT_OUTPUT_FORMAT"] = "jsonl"
+
+        intervals = list(getattr(self.env, "traffic_count_intervals", []) or [])
+        if interval not in intervals:
+            intervals.append(interval)
+            self.dic_traffic_env_conf["TRAFFIC_COUNT_INTERVALS"] = sorted(set(intervals))
+            current_time = self.env.get_current_time()
+            if current_time in (None, 0, 0.0):
+                try:
+                    self.env._init_traffic_counter()
+                except Exception as exc:
+                    print(f"Traffic series counter init failed: {exc}")
+
+        self._traffic_series_intersection_index = {
+            inter_id: idx for idx, inter_id in enumerate(getattr(self.env, "traffic_intersection_ids", []) or [])
+        }
+        self._traffic_series_movement_keys = list(
+            getattr(self.env, "traffic_movement_keys", []) or ["NT", "NL", "ST", "SL", "ET", "EL", "WT", "WL"]
+        )
+        self._traffic_series_base_dt = getattr(self.env, "traffic_base_dt", None) or datetime(1970, 1, 1)
+
+    def _build_traffic_series_history(self, intersection_id, current_time_s):
+        self._load_traffic_series()
+        interval = int(self.traffic_series_interval_s or 2)
+        if interval <= 0:
+            interval = 2
+        series_keys, output_keys = self._resolve_series_movement_keys()
+        num_series_keys = len(series_keys)
+        counts = getattr(self.env, "traffic_counts_by_interval", {}).get(interval)
+        inter_idx = (self._traffic_series_intersection_index or {}).get(intersection_id)
+
+        current_bin = int(current_time_s) // interval
+        if counts is not None and counts.size > 0:
+            if current_bin >= counts.shape[0]:
+                current_bin = counts.shape[0] - 1
+        if current_bin < 0:
+            current_bin = 0
+
+        window_bins = int(self.traffic_series_window_s // interval) if interval > 0 else 0
+        start_bin = max(0, current_bin - window_bins)
+        base_dt = self._traffic_series_base_dt or datetime(1970, 1, 1)
+        history = []
+        for bin_idx in range(start_bin, current_bin + 1):
+            date_str = (base_dt + timedelta(seconds=bin_idx * interval)).strftime("%Y-%m-%d %H:%M:%S")
+            movement_counts = {key: 0 for key in output_keys}
+            if counts is not None and counts.size > 0 and inter_idx is not None and bin_idx >= 0:
+                if bin_idx < counts.shape[0]:
+                    offset = inter_idx * num_series_keys
+                    row = counts[bin_idx, offset : offset + num_series_keys]
+                    for mv_i, key in enumerate(series_keys):
+                        if mv_i < len(row):
+                            movement_counts[key] = int(row[mv_i])
+            history.append({"date": date_str, "movement_counts": movement_counts})
+        return history
+
+    def _record_traffic_prompt_series(self, current_time_s, prompts):
+        if not prompts:
+            return
+        self._load_traffic_series()
+        if not self._traffic_series_output_path:
+            return
+        interval = int(self.traffic_series_interval_s or 2)
+        if interval <= 0:
+            interval = 2
+        current_bin = int(current_time_s) // interval
+        if current_bin <= self._traffic_series_last_written_bin:
+            return
+        self._traffic_series_last_written_bin = current_bin
+
+        with open(self._traffic_series_output_path, "a", encoding="utf-8") as handle:
+            for idx, prompt in enumerate(prompts):
+                intersection_id = self.env.list_intersection[idx].inter_name
+                history = self._build_traffic_series_history(intersection_id, current_time_s)
+                for hist_idx, entry in enumerate(history):
+                    record = {
+                        "date": entry.get("date"),
+                        "interval_s": int(interval),
+                        "intersection_id": intersection_id,
+                        "movement_counts": entry.get("movement_counts", {}),
+                        "prompt": prompt if hist_idx == len(history) - 1 else "",
+                    }
+                    handle.write(json.dumps(record, ensure_ascii=False) + "\n")
+
     def _token_in_vocab(self, token):
         if not token or self.tokenizer is None:
             return False
@@ -2125,6 +2432,8 @@ class LLM_Inference_VLLM:
                 prompt = prompt[0]['content'] + "\n\n### Instruction:\n" + prompt[1]['content'] + "\n\n### Response:\n"
                 prompts.append(prompt)
 
+            self._record_traffic_prompt_series(current_time, prompts)
+
             inputs_text = [
                     self.tokenizer.apply_chat_template(
                         [{"role": "user", "content": f"<start_of_image> {p}"}],  # 这里 content 直接用字符串 p
@@ -2152,7 +2461,8 @@ class LLM_Inference_VLLM:
 
             responses = []
             bs = 16
-            for start in range(0, len(vllm_prompts), bs):
+            for start in range(0, len(inputs_text), bs):
+                # batch = inputs_text[start:start + bs]
                 batch = vllm_prompts[start:start + bs]
 
                 # vLLM.generate 返回的是 RequestOutput 列表，不是 token ids

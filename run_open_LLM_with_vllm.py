@@ -116,7 +116,7 @@ def main(in_args):
         "ENABLE_TRAFFIC_COUNT": True,
         "TRAFFIC_COUNT_MODE": "intersection_movement",
         "TRAFFIC_COUNT_OUTPUT_FORMAT": "jsonl",
-        "TRAFFIC_COUNT_INTERVALS": [5, 60, 3600],
+        "TRAFFIC_COUNT_INTERVALS": [2, 5, 60, 3600],
         "TRAFFIC_COUNT_ADD_TOTAL": True,
         "TRAFFIC_COUNT_BASENAME": "traffic_counts",
 

@@ -21,7 +21,7 @@ def parse_args():
     parser.add_argument("--workers", type=int, default=1)
     parser.add_argument("--dataset", type=str, default="template")
     parser.add_argument("--traffic_file", type=str, default="flow_main_stream.json")
-
+ 
     return parser.parse_args()
 
 def _resolve_ts_adapter_device():
